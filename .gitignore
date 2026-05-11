@@ -1,0 +1,20 @@
+__MACOSX
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Cline
+.cline/
+.clinerules
+.clineignore
+
+# Planning and documentation files
+PLAN.md
+TEST_RESULTS.md
+VAST_DRUM_PLAN.md
+KURZWEIL_K2000_VAST.md
+KRZ_FORMAT_DESIGN.md
+
+# Archives
+*.zip
