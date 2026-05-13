@@ -212,6 +212,76 @@ func TestParseNoteMapConfig(t *testing.T) {
 	})
 }
 
+// TestBuildProgramName verifies that the output program name embeds the source
+// WAV file's base name.
+func TestBuildProgramName(t *testing.T) {
+	tests := []struct {
+		name        string
+		programName string
+		inputPath   string
+		want        string
+	}{
+		{
+			name:        "default name with simple wav",
+			programName: "SampleSlice",
+			inputPath:   "/path/to/drums.wav",
+			want:        "SampleSlice_drums",
+		},
+		{
+			name:        "custom name with simple wav",
+			programName: "MyKit",
+			inputPath:   "/path/to/kicks.wav",
+			want:        "MyKit_kicks",
+		},
+		{
+			name:        "empty name defaults to SampleSlice",
+			programName: "",
+			inputPath:   "/path/to/snare.wav",
+			want:        "SampleSlice_snare",
+		},
+		{
+			name:        "wav with hyphens preserved",
+			programName: "Prog",
+			inputPath:   "/path/to/my-loop.wav",
+			want:        "Prog_my-loop",
+		},
+		{
+			name:        "wav in nested path uses only filename",
+			programName: "Beat",
+			inputPath:   "/deep/path/to/file/beat_loop.wav",
+			want:        "Beat_beat_loop",
+		},
+		{
+			name:        "wav name with spaces sanitized",
+			programName: "Kit",
+			inputPath:   "/path/to/my loop.wav",
+			want:        "Kit_my_loop",
+		},
+		{
+			name:        "program name special chars sanitized",
+			programName: "My Kit!",
+			inputPath:   "/path/to/drums.wav",
+			want:        "My_Kit_drums",
+		},
+		{
+			name:        "wav without extension uses full basename",
+			programName: "Kit",
+			inputPath:   "/path/to/drums",
+			want:        "Kit_drums",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildProgramName(tt.programName, tt.inputPath)
+			if got != tt.want {
+				t.Errorf("buildProgramName(%q, %q) = %q, want %q",
+					tt.programName, tt.inputPath, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestResolveNote verifies note resolution priority: custom map, GM map, default.
 func TestResolveNote(t *testing.T) {
 	t.Run("custom map takes priority", func(t *testing.T) {

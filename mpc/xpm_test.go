@@ -40,7 +40,7 @@ func buildXPMSamples(n, perSlice int) [][]int16 {
 // TestGenerateXPMProgram_XPMFileValid verifies the .xpm file exists and parses as valid XML.
 func TestGenerateXPMProgram_XPMFileValid(t *testing.T) {
 	dir := t.TempDir()
-	_, err := mpc.GenerateXPMProgram(buildXPMSlices(3), "myprog", dir, 48, buildXPMSamples(3, 100), 44100)
+	_, err := mpc.GenerateXPMProgram(buildXPMSlices(3), "myprog", dir, buildXPMSamples(3, 100), 44100)
 	if err != nil {
 		t.Fatalf("GenerateXPMProgram() error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestGenerateXPMProgram_XPMFileValid(t *testing.T) {
 func TestGenerateXPMProgram_SamplesDir(t *testing.T) {
 	dir := t.TempDir()
 	n := 4
-	_, err := mpc.GenerateXPMProgram(buildXPMSlices(n), "prog", dir, 48, buildXPMSamples(n, 50), 44100)
+	_, err := mpc.GenerateXPMProgram(buildXPMSlices(n), "prog", dir, buildXPMSamples(n, 50), 44100)
 	if err != nil {
 		t.Fatalf("GenerateXPMProgram() error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestGenerateXPMProgram_SamplesDir(t *testing.T) {
 func TestGenerateXPMProgram_PadCountMatchesSlices(t *testing.T) {
 	dir := t.TempDir()
 	n := 5
-	_, err := mpc.GenerateXPMProgram(buildXPMSlices(n), "prog", dir, 48, buildXPMSamples(n, 50), 44100)
+	_, err := mpc.GenerateXPMProgram(buildXPMSlices(n), "prog", dir, buildXPMSamples(n, 50), 44100)
 	if err != nil {
 		t.Fatalf("GenerateXPMProgram() error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestGenerateXPMProgram_PadCountMatchesSlices(t *testing.T) {
 func TestGenerateXPMProgram_SampleFilePaths(t *testing.T) {
 	dir := t.TempDir()
 	n := 3
-	_, err := mpc.GenerateXPMProgram(buildXPMSlices(n), "prog", dir, 48, buildXPMSamples(n, 50), 44100)
+	_, err := mpc.GenerateXPMProgram(buildXPMSlices(n), "prog", dir, buildXPMSamples(n, 50), 44100)
 	if err != nil {
 		t.Fatalf("GenerateXPMProgram() error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestGenerateXPMProgram_SampleFilePaths(t *testing.T) {
 // TestGenerateXPMProgram_NoXPJFile verifies no .xpj is written by the XPM path.
 func TestGenerateXPMProgram_NoXPJFile(t *testing.T) {
 	dir := t.TempDir()
-	_, err := mpc.GenerateXPMProgram(buildXPMSlices(2), "prog", dir, 48, buildXPMSamples(2, 50), 44100)
+	_, err := mpc.GenerateXPMProgram(buildXPMSlices(2), "prog", dir, buildXPMSamples(2, 50), 44100)
 	if err != nil {
 		t.Fatalf("GenerateXPMProgram() error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestGenerateXPMProgram_NoXPJFile(t *testing.T) {
 // TestGenerateXPMProgram_NoSlices verifies an error is returned for empty input.
 func TestGenerateXPMProgram_NoSlices(t *testing.T) {
 	dir := t.TempDir()
-	_, err := mpc.GenerateXPMProgram(nil, "prog", dir, 48, nil, 44100)
+	_, err := mpc.GenerateXPMProgram(nil, "prog", dir, nil, 44100)
 	if err == nil {
 		t.Fatal("expected error for empty slices, got nil")
 	}

@@ -55,10 +55,7 @@ func Run(cfg *config.Config) error {
 		outputDir = filepath.Join(dir, nameWithoutExt+"_sliced")
 	}
 
-	programName := mpc.SanitizeProgramName(cfg.ProgramName)
-	if programName == "" {
-		programName = "SampleSlice"
-	}
+	programName := buildProgramName(cfg.ProgramName, cfg.InputPath)
 
 	startTime := time.Now()
 
@@ -178,11 +175,11 @@ func Run(cfg *config.Config) error {
 
 	switch outputFormat {
 	case config.FormatMPC, config.FormatXPM:
-		err = generateXPMPrograms(audioSlices, samples, programName, outputDir, cfg.RootNote, wavData, cfg)
+		err = generateXPMPrograms(audioSlices, samples, programName, outputDir, wavData, cfg, customNoteMap)
 	case config.FormatKRZ:
 		err = generateKRZPrograms(audioSlices, samples, programName, outputDir, cfg.RootNote, wavData, cfg, customNoteMap)
 	case config.FormatBoth:
-		err = generateXPMPrograms(audioSlices, samples, programName, outputDir, cfg.RootNote, wavData, cfg)
+		err = generateXPMPrograms(audioSlices, samples, programName, outputDir, wavData, cfg, customNoteMap)
 		if err == nil {
 			err = generateKRZPrograms(audioSlices, samples, programName, outputDir, cfg.RootNote, wavData, cfg, customNoteMap)
 		}
@@ -196,9 +193,11 @@ func Run(cfg *config.Config) error {
 
 	elapsed := time.Since(startTime)
 	fmt.Printf("\nComplete! Total time: %.2fs\n", elapsed.Seconds())
-	fmt.Println("To use in your MPC:")
-	fmt.Println(" 1. Copy the output folder to your MPC's storage")
-	fmt.Println(" 2. Load the .xpm program file in your MPC software")
+	if outputFormat != config.FormatKRZ {
+		fmt.Println("To use in your MPC:")
+		fmt.Println(" 1. Copy the output folder to your MPC's storage")
+		fmt.Println(" 2. Load the .xpm program file in your MPC software")
+	}
 
 	return nil
 }
@@ -288,8 +287,14 @@ func generateKRZPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 
 // generateXPMPrograms creates an Akai MPC-compatible .xpm XML program with
 // individual WAV files written to outputDir/Samples/.
-func generateXPMPrograms(audioSlices []slice.AudioSlice, samples []float64, programName, outputDir string, rootNote int, wavData *input.WAVFile, cfg *config.Config) error {
+func generateXPMPrograms(audioSlices []slice.AudioSlice, samples []float64, programName, outputDir string, wavData *input.WAVFile, cfg *config.Config, customNoteMap map[int]int) error {
 	fmt.Printf("Generating XPM program in: %s\n", outputDir)
+
+	remappedSlices := make([]slice.AudioSlice, len(audioSlices))
+	for i, s := range audioSlices {
+		remappedSlices[i] = s
+		remappedSlices[i].Note = midi.MIDIToNote(resolveNote(i, s.Note, cfg, customNoteMap))
+	}
 
 	sliceSamples := make([][]int16, len(audioSlices))
 	for i, s := range audioSlices {
@@ -307,7 +312,7 @@ func generateXPMPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 		sliceSamples[i] = floatToInt16(raw)
 	}
 
-	prog, err := mpc.GenerateXPMProgram(audioSlices, programName, outputDir, rootNote, sliceSamples, wavData.SampleRate)
+	prog, err := mpc.GenerateXPMProgram(remappedSlices, programName, outputDir, sliceSamples, wavData.SampleRate)
 	if err != nil {
 		return fmt.Errorf("generating XPM program: %w", err)
 	}
@@ -371,6 +376,24 @@ func parseNoteMapConfig(noteMap []string) map[int]int {
 		result[idx] = note
 	}
 	return result
+}
+
+// buildProgramName combines the sanitized user-supplied program name with the
+// source WAV file's base name (without extension). If the user name is empty
+// after sanitization it falls back to "SampleSlice".
+// Example: ("MyKit", "/path/to/drums.wav") → "MyKit_drums"
+func buildProgramName(userProgramName, inputPath string) string {
+	name := mpc.SanitizeProgramName(userProgramName)
+	if name == "" {
+		name = "SampleSlice"
+	}
+	base := filepath.Base(inputPath)
+	ext := filepath.Ext(base)
+	wavBase := mpc.SanitizeProgramName(base[:len(base)-len(ext)])
+	if wavBase != "" {
+		name = name + "_" + wavBase
+	}
+	return name
 }
 
 // resolveNote determines the MIDI note for a given slice using the precomputed note map.

@@ -78,7 +78,6 @@ func GenerateXPMProgram(
 	slices []slice.AudioSlice,
 	programName string,
 	outputDir string,
-	startNote int,
 	sliceSamples [][]int16,
 	sampleRate uint32,
 ) (*Program, error) {
