@@ -3,7 +3,7 @@
 SampleSlice turns long recording sessions into ready-to-use drum samples and
 loop libraries. Point it at a WAV file and it automatically detects every hit,
 slices the audio apart, and exports the results directly into Akai MPC or
-Kurzweil sampler formats — no DAW, no manual editing required.
+Kurzweil sampler formats. No DAW or manual editing required.
 
 ## Overview
 
@@ -17,20 +17,20 @@ note assignment.
 
 ## Features
 
-- **Two slicing modes** — energy-based transient detection or beat-grid
+- Two slicing modes: energy-based transient detection or beat-grid
   (BPM-aligned equal-length bars)
-- **Multiple output formats** — Akai MPC `.xpm` (XML + individual WAV files),
+- Multiple output formats: Akai MPC `.xpm` (XML + individual WAV files),
   Kurzweil `.krz`, or both in one pass
-- **Note mapping** — sequential, General MIDI drum layout (`--gm-map`), or
+- Note mapping: sequential, General MIDI drum layout (`--gm-map`), or
   fully custom per-slice (`--note-map`)
-- **Per-slice processing** — peak-normalize to 0 dBFS (`--normalize`) and strip
+- Per-slice processing: peak-normalize to 0 dBFS (`--normalize`) and strip
   inaudible silence (`--auto-trim`)
-- **Deduplication** — remove near-duplicate slices by waveform energy profile
+- Deduplication: remove near-duplicate slices by waveform energy profile
   (`--dedupe`)
-- **KRZ voice control** — drum or poly voice modes, ADPCM compression, envelope
+- KRZ voice control: drum or poly voice modes, ADPCM compression, envelope
   presets, voice priority, and stereo
-- **Transient report** — export slice timing and MIDI metadata as JSON or CSV
-- **Shell completions** — bash, zsh, fish, and PowerShell
+- Transient report: export slice timing and MIDI metadata as JSON or CSV
+- Shell completions: bash, zsh, fish, and PowerShell
 
 ## Supported WAV input
 
@@ -72,7 +72,7 @@ go build -ldflags "-X sampleslice/cmd.Version=1.0.0 \
 # Built: 2026-05-11T00:00:00Z
 ```
 
-## Quick Start
+## Quick start
 
 Slice a drum loop into an MPC program in one command:
 
@@ -82,8 +82,8 @@ Slice a drum loop into an MPC program in one command:
 
 SampleSlice creates a `drums_sliced/` directory containing:
 
-- `SampleSlice.xpm` — MPC drum program file
-- `Samples/slice_001.wav`, `slice_002.wav`, … — individual slice WAV files
+- `SampleSlice.xpm`: MPC drum program file
+- `Samples/slice_001.wav`, `slice_002.wav`, …: individual slice WAV files
 
 Load the `.xpm` file in MPC software or copy the directory to your MPC's
 storage drive.
@@ -98,10 +98,10 @@ The default mode finds every attack or onset in the audio automatically.
 # Use defaults (sensitivity 0.5, 50ms minimum interval)
 ./sampleslice --input loop.wav
 
-# More sensitive — catches quieter hits
+# More sensitive: catches quieter hits
 ./sampleslice --input loop.wav --sensitivity 0.2
 
-# Stricter — only the loudest transients
+# Stricter: only the loudest transients
 ./sampleslice --input loop.wav --sensitivity 0.8
 
 # Require at least 80ms between detections (prevents double-triggering)
@@ -139,7 +139,7 @@ a bar are discarded.
 ### Output formats
 
 ```bash
-# Akai MPC .xpm (default) — XML program + individual WAV files
+# Akai MPC .xpm (default): XML program + individual WAV files
 ./sampleslice --input loop.wav --format mpc
 
 # Kurzweil .krz
@@ -317,6 +317,21 @@ go test ./...
 
 All packages include unit tests. The `test/` package runs a full end-to-end
 pipeline test: WAV creation → transient detection → slicing → WAV export.
+
+## About the author
+
+SampleSlice is written by [xyplex3](https://github.com/xyplex3), a developer and musician based in Seattle, WA.
+
+The musical project is **Xyplex2** — industrial, experimental, and distorted-beats music released on the Detroit Industrial label. The debut album *Second Shift* came out in May 2022 and is available on Bandcamp as a digital download or limited-edition USB + cassette.
+
+Xyplex2 is based in the Seattle area and is available for underground techno and industrial shows. If you like this project please book Xyplex2 for shows!
+
+- [Xyplex2 — *Second Shift* on Bandcamp](https://xyplex2.bandcamp.com/album/xyplex2-second-shift)
+- [Supervisory Control (YouTube)](https://www.youtube.com/watch?v=Bz2r5YaahPc)
+- [Second Shift (YouTube)](https://www.youtube.com/watch?v=wHfb6Ot2kn8)
+- [Extreme Directions (YouTube)](https://www.youtube.com/watch?v=cxTlZX4JkG4)
+- [Direct Object Reference (YouTube)](https://www.youtube.com/watch?v=dvZuhBXuwZU)
+- [Xyplex2 on Instagram](https://www.instagram.com/xyplex2official/)
 
 ## License
 
