@@ -113,8 +113,13 @@ func (p *Program) SetKeymap(partIndex int, keymap *Keymap) {
 	}
 }
 
+// layerStride is the fixed byte size of one program layer slot in the
+// serialized output: the size an active part's fields add up to. Empty
+// slots are padded to the same size so all 8 slots share one stride.
+const layerStride = 43
+
 // Serialize converts the program to its binary KRZ representation.
-// The output includes a 6-byte header, 8 layer blocks (40 bytes each),
+// The output includes a 6-byte header, 8 layer blocks (43 bytes each),
 // voice mode, priority, and the 10-parameter envelope.
 func (p *Program) Serialize() ([]byte, error) {
 	var buf bytes.Buffer
@@ -174,7 +179,7 @@ func (p *Program) Serialize() ([]byte, error) {
 			ew.write(portamentoFlags)
 			ew.write(part.PortamentoTime)
 		} else {
-			ew.writeBytes(make([]byte, 40))
+			ew.writeBytes(make([]byte, layerStride))
 		}
 	}
 

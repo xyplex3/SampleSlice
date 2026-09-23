@@ -26,7 +26,7 @@ func TestNewKeymap(t *testing.T) {
 			nameStr:  "Kick",
 			wantID:   1,
 			wantName: "Kick",
-			wantHash: 0x8201,
+			wantHash: 0x8501,
 			},
 			{
 			name:     "long name truncated",
@@ -34,7 +34,7 @@ func TestNewKeymap(t *testing.T) {
 			nameStr:  "ThisIsAVeryLongName",
 			wantID:   2,
 			wantName: "ThisIsAVeryLongN",
-			wantHash: 0x8202,
+			wantHash: 0x8502,
 			},
 			{
 			name:     "empty name",
@@ -42,7 +42,7 @@ func TestNewKeymap(t *testing.T) {
 			nameStr:  "",
 			wantID:   3,
 			wantName: "",
-			wantHash: 0x8203,
+			wantHash: 0x8503,
 			},
 	}
 
@@ -122,9 +122,9 @@ func TestKeymap_Serialize(t *testing.T) {
 				return km
 				},
 			check: func(t *testing.T, data []byte) {
-				// Verify header bytes: hash 0x8201
-				if binary.BigEndian.Uint16(data[0:2]) != 0x8201 {
-					t.Errorf("header hash = 0x%04x, want 0x8201", binary.BigEndian.Uint16(data[0:2]))
+				// Verify header bytes: hash 0x8501
+				if binary.BigEndian.Uint16(data[0:2]) != 0x8501 {
+					t.Errorf("header hash = 0x%04x, want 0x8501", binary.BigEndian.Uint16(data[0:2]))
 				}
 				// sample count should be 1
 				if binary.BigEndian.Uint16(data[2:4]) != 1 {
@@ -172,9 +172,9 @@ func TestKeymap_Serialize(t *testing.T) {
 				return km
 				},
 			check: func(t *testing.T, data []byte) {
-				// hash should be 0x8202
-				if binary.BigEndian.Uint16(data[0:2]) != 0x8202 {
-					t.Errorf("header hash = 0x%04x, want 0x8202", binary.BigEndian.Uint16(data[0:2]))
+				// hash should be 0x8502
+				if binary.BigEndian.Uint16(data[0:2]) != 0x8502 {
+					t.Errorf("header hash = 0x%04x, want 0x8502", binary.BigEndian.Uint16(data[0:2]))
 				}
 				// sample count should be 3
 				if binary.BigEndian.Uint16(data[2:4]) != 3 {
@@ -293,10 +293,10 @@ func TestKeymap_HashComputation(t *testing.T) {
 		id       uint16
 		wantHash uint16
 	}{
-			{1, 0x8201},
-			{0, 0x8200},
-			{255, 0x82FF},
-			{1000, 0x82E8}, // 1000 & 0xFF = 232 = 0xE8
+			{1, 0x8501},
+			{0, 0x8500},
+			{255, 0x85FF},
+			{1000, 0x85E8}, // 1000 & 0xFF = 232 = 0xE8
 	}
 
 	for _, tc := range tests {
@@ -392,8 +392,8 @@ func TestKeymap_SerializeRoundTrip(t *testing.T) {
 	if len(data) < 4 {
 		t.Fatal("data too short")
 	}
-	if binary.BigEndian.Uint16(data[0:2]) != 0x8203 {
-		t.Errorf("hash = 0x%04x, want 0x8203", binary.BigEndian.Uint16(data[0:2]))
+	if binary.BigEndian.Uint16(data[0:2]) != 0x8503 {
+		t.Errorf("hash = 0x%04x, want 0x8503", binary.BigEndian.Uint16(data[0:2]))
 	}
 	if binary.BigEndian.Uint16(data[2:4]) != 2 {
 		t.Errorf("sample count = %d, want 2", binary.BigEndian.Uint16(data[2:4]))

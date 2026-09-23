@@ -5,7 +5,7 @@ package krz
 // Kurzweil data structure (programs, keymaps, songs, etc.).
 const (
 	T_PROGRAM      = 0x84 // Program object (instrument definition)
-	T_KEYMAP       = 0x82 // Keymap object (sample collection)
+	T_KEYMAP       = 0x85 // Keymap object (sample collection)
 	T_EFFECT       = 0x71 // Effect object
 	T_SONG         = 0x70 // Song/sequence object
 	T_SETUP        = 0x87 // System setup object

@@ -210,7 +210,7 @@ func TestKRZFile_Serialize(t *testing.T) {
 				if len(data) < 4 {
 					t.Fatal("data too short for magic bytes")
 				}
-				expectedMagic := []byte{0x4B, 0x52, 0x5A, 0x00}
+				expectedMagic := []byte{0x50, 0x52, 0x41, 0x4D} // "PRAM"
 				if !bytes.Equal(data[:4], expectedMagic) {
 					t.Errorf("magic bytes = %v, want %v", data[:4], expectedMagic)
 				}
@@ -431,7 +431,7 @@ func TestCreateFromSlices(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "note zero defaults to 60",
+			name: "note zero is a valid explicit note, not remapped",
 			slices: []SliceData{
 				{Samples: []int16{100}, Note: 0},
 			},
@@ -492,7 +492,7 @@ func TestCreateFromSlices(t *testing.T) {
 			}
 			// Verify magic bytes present
 			if len(data) >= 4 {
-				expectedMagic := []byte{0x4B, 0x52, 0x5A, 0x00}
+				expectedMagic := []byte{0x50, 0x52, 0x41, 0x4D} // "PRAM"
 				if !bytes.Equal(data[:4], expectedMagic) {
 					t.Errorf("magic bytes = %v, want %v", data[:4], expectedMagic)
 				}
@@ -645,5 +645,145 @@ func TestVoiceModeConstants(t *testing.T) {
 	}
 	if VoiceModePoly != 1 {
 		t.Errorf("VoiceModePoly = %d, want 1", VoiceModePoly)
+	}
+}
+
+// -----------------------------------------------------------------------
+// Regression tests for the header/table/format/model/note-0 fixes
+// -----------------------------------------------------------------------
+
+// firstObjectTableEntry decodes the hash and recorded offset of the first
+// object table entry in a serialized KRZ file, using only the header's own
+// declared model count so the test tracks headerSize's real definition
+// instead of hardcoding it.
+func firstObjectTableEntry(t *testing.T, data []byte) (hash uint16, offset uint32) {
+	t.Helper()
+	modelCount := binary.BigEndian.Uint16(data[6:8])
+	headerSize := 4 + 2 + 2 + 2*int(modelCount) + 2
+	hash = binary.BigEndian.Uint16(data[headerSize : headerSize+2])
+	offset = binary.BigEndian.Uint32(data[headerSize+2 : headerSize+6])
+	return hash, offset
+}
+
+// TestSerialize_ObjectTableOffsetsMatchData verifies the object table's
+// recorded offset for the first object (the keymap, written first) actually
+// points at that object's data in the file — i.e. the hash at data[offset:]
+// matches the hash recorded in the table entry. This guards against
+// headerSize drifting out of sync with the bytes actually written for the
+// header (it previously did: a hardcoded headerSize=16 didn't match the
+// real header length whenever len(Models) != 1).
+func TestSerialize_ObjectTableOffsetsMatchData(t *testing.T) {
+	data, err := CreateFromSlices([]SliceData{{Samples: []int16{100, 200}, Note: 36}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantHash, offset := firstObjectTableEntry(t, data)
+	if int(offset)+2 > len(data) {
+		t.Fatalf("recorded offset %d is out of bounds (len %d)", offset, len(data))
+	}
+	gotHash := binary.BigEndian.Uint16(data[offset : offset+2])
+	if gotHash != wantHash {
+		t.Errorf("hash at recorded offset %d = 0x%04x, want 0x%04x (table offset doesn't point at the object's own data)",
+			offset, gotHash, wantHash)
+	}
+}
+
+// TestSerialize_ObjectTableOffsetsMatchData_MultiModel is the same check
+// with a non-default Models list, since headerSize depends on len(Models).
+func TestSerialize_ObjectTableOffsetsMatchData_MultiModel(t *testing.T) {
+	data, err := CreateFromSlices(
+		[]SliceData{{Samples: []int16{100, 200}, Note: 36}},
+		WithModels([]uint16{0x0064, 0x0065, 0x0066}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantHash, offset := firstObjectTableEntry(t, data)
+	if int(offset)+2 > len(data) {
+		t.Fatalf("recorded offset %d is out of bounds (len %d)", offset, len(data))
+	}
+	gotHash := binary.BigEndian.Uint16(data[offset : offset+2])
+	if gotHash != wantHash {
+		t.Errorf("hash at recorded offset %d = 0x%04x, want 0x%04x (table offset doesn't point at the object's own data)",
+			offset, gotHash, wantHash)
+	}
+}
+
+// keymapRootNote decodes the RootNote of the first sample block in the first
+// (keymap) object of a serialized KRZ file produced with default options.
+func keymapRootNote(t *testing.T, data []byte) uint16 {
+	t.Helper()
+	_, offset := firstObjectTableEntry(t, data)
+	// Keymap.Serialize layout: hash(2) count(2) reserved(6) nameLen(1) name(16)
+	// = 27 bytes, then per sample: type(1) flags(1) startNote(2) endNote(2)
+	// rootNote(2) ...
+	rootNoteOffset := offset + 27 + 1 + 1 + 2 + 2
+	return binary.BigEndian.Uint16(data[rootNoteOffset : rootNoteOffset+2])
+}
+
+// TestCreateFromSlices_NoteZeroNotRemapped verifies MIDI note 0 is written
+// through as-is instead of being silently remapped to 60 (C4).
+func TestCreateFromSlices_NoteZeroNotRemapped(t *testing.T) {
+	data, err := CreateFromSlices([]SliceData{{Samples: []int16{100, 200}, Note: 0}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := keymapRootNote(t, data); got != 0 {
+		t.Errorf("RootNote = %d, want 0 (note 0 should not be remapped)", got)
+	}
+}
+
+// TestKeymap_AddSample_Format2Is16Bit verifies format 2 (16-bit signed, the
+// format CreateFromSlices now uses by default) produces two raw bytes per
+// input sample, not the crushed-to-8-bit output format 8 used to produce.
+func TestKeymap_AddSample_Format2Is16Bit(t *testing.T) {
+	km := NewKeymap(1, "Test")
+	samples := []int16{100, 200, 300, 400}
+	km.AddSample(samples, 60, 60, 60, 2, false)
+
+	got := len(km.Samples[0].RawData)
+	want := len(samples) * 2
+	if got != want {
+		t.Errorf("RawData length = %d, want %d (2 bytes/sample for 16-bit format)", got, want)
+	}
+}
+
+// TestCreateFromSlices_DefaultFormatIs16Bit verifies the default sample
+// format used by CreateFromSlices is 2 (16-bit signed), not the old
+// undefined format code 8.
+func TestCreateFromSlices_DefaultFormatIs16Bit(t *testing.T) {
+	data, err := CreateFromSlices([]SliceData{{Samples: []int16{100, 200}, Note: 36}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, offset := firstObjectTableEntry(t, data)
+	// Format field follows rootNote: type(1) flags(1) startNote(2) endNote(2)
+	// rootNote(2) format(2).
+	formatOffset := offset + 27 + 1 + 1 + 2 + 2 + 2
+	format := binary.BigEndian.Uint16(data[formatOffset : formatOffset+2])
+	if format != 2 {
+		t.Errorf("default sample Format = %d, want 2 (16-bit signed)", format)
+	}
+}
+
+// TestCreateFromSlices_WithModels verifies WithModels overrides the default
+// PC2/PC3 model list.
+func TestCreateFromSlices_WithModels(t *testing.T) {
+	data, err := CreateFromSlices(
+		[]SliceData{{Samples: []int16{100}, Note: 36}},
+		WithModels([]uint16{0x1234}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	modelCount := binary.BigEndian.Uint16(data[6:8])
+	if modelCount != 1 {
+		t.Fatalf("model count = %d, want 1", modelCount)
+	}
+	model := binary.BigEndian.Uint16(data[8:10])
+	if model != 0x1234 {
+		t.Errorf("model = 0x%04x, want 0x1234", model)
 	}
 }

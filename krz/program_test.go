@@ -185,8 +185,8 @@ func TestProgram_SetKeymap(t *testing.T) {
 
 // programVoiceModeOffset is the fixed byte offset of the voice-mode byte
 // in a program serialized with zero active parts (all 8 layers empty).
-// Layout: hash(2) + size(2) + nameOffset(2) + name(16) + 8*emptyLayer(40) = 342.
-const programVoiceModeOffset = 342
+// Layout: hash(2) + size(2) + nameOffset(2) + name(16) + 8*emptyLayer(43) = 366.
+const programVoiceModeOffset = 366
 
 func TestProgram_Serialize(t *testing.T) {
 	t.Run("returns non-empty bytes", func(t *testing.T) {
@@ -279,6 +279,90 @@ func TestProgram_Serialize(t *testing.T) {
 	})
 }
 
+// TestProgram_Serialize_ActivePart verifies that a program with an active
+// part serializes with a consistent layer stride: all 8 layer slots are
+// exactly layerStride bytes, so the voice-mode byte, priority byte, and
+// envelope land at the same offsets regardless of how many parts are active.
+func TestProgram_Serialize_ActivePart(t *testing.T) {
+	p := NewProgram(1, "Active", VoiceModePoly, 4, true, DefaultPolyEnvelope())
+	p.AddPart(Part{
+		Enabled:   true,
+		PartID:    1,
+		KeymapRef: 0x8201,
+		RootNote:  60,
+		Transpose: -12,
+		Velocity:  100,
+		Pan:       64,
+		Output:    1,
+		LoKey:     0,
+		HiKey:     127,
+		LoVel:     0,
+		HiVel:     127,
+	})
+
+	data, err := p.Serialize()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	firstLayer := 22 // hash(2) + size(2) + nameOffset(2) + name(16)
+	if len(data) != firstLayer+8*layerStride+1+1+10 {
+		t.Errorf("serialized len = %d, want %d (header + 8*%d + voice + priority + envelope)",
+			len(data), firstLayer+8*layerStride+1+1+10, layerStride)
+	}
+
+	// Every layer slot must be the same fixed size: layer 0 (active) and
+	// layers 1-7 (empty placeholders) alike.
+	for i := 0; i < 8; i++ {
+		slot := data[firstLayer+i*layerStride : firstLayer+(i+1)*layerStride]
+		if len(slot) != layerStride {
+			t.Errorf("layer %d slot size = %d, want %d", i, len(slot), layerStride)
+		}
+	}
+
+	// The active part's fields decode from the first layer slot.
+	slot := data[firstLayer : firstLayer+layerStride]
+	if slot[0] != 1 {
+		t.Errorf("enabled byte = %d, want 1", slot[0])
+	}
+	if got := binary.BigEndian.Uint16(slot[1:3]); got != 1 {
+		t.Errorf("part id = %d, want 1", got)
+	}
+	if got := binary.BigEndian.Uint16(slot[3:5]); got != 0x8201 {
+		t.Errorf("keymap ref = 0x%04x, want 0x8201", got)
+	}
+	if got := binary.BigEndian.Uint16(slot[5:7]); got != 60 {
+		t.Errorf("root note = %d, want 60", got)
+	}
+	if got := int16(binary.BigEndian.Uint16(slot[7:9])); got != -12 {
+		t.Errorf("transpose = %d, want -12", got)
+	}
+	if got := binary.BigEndian.Uint16(slot[9:11]); got != 100 {
+		t.Errorf("velocity = %d, want 100", got)
+	}
+
+	// The trailing voice-mode/priority/envelope bytes sit at the same
+	// offsets as an all-empty program.
+	if data[programVoiceModeOffset]&0x02 == 0 {
+		t.Errorf("voice mode byte = 0x%02x, want poly bit (0x02) set", data[programVoiceModeOffset])
+	}
+	if data[programVoiceModeOffset]&0x01 == 0 {
+		t.Errorf("voice mode byte = 0x%02x, want stereo bit (0x01) set", data[programVoiceModeOffset])
+	}
+	if got := data[programVoiceModeOffset+1]; got != 3 { // priority 4 - 1 = 3
+		t.Errorf("priority byte = %d, want 3 (priority 4 - 1)", got)
+	}
+	// Envelope: 9 bytes + 1 reserved, immediately after the priority byte.
+	e := DefaultPolyEnvelope()
+	wantEnv := []byte{e.Attack, e.Decay1, e.Level1, e.Decay2, e.Level2, e.Decay3, e.Level3, e.Sustain, e.Release, 0}
+	gotEnv := data[programVoiceModeOffset+2 : programVoiceModeOffset+12]
+	for i := range wantEnv {
+		if gotEnv[i] != wantEnv[i] {
+			t.Errorf("envelope byte[%d] = %d, want %d", i, gotEnv[i], wantEnv[i])
+		}
+	}
+}
+
 // -----------------------------------------------------------------------
 // Tests for Program.CalculateSize
 // -----------------------------------------------------------------------
@@ -324,7 +408,7 @@ func TestProgram_InKRZFile(t *testing.T) {
 	f := NewKRZFile(1)
 
 	km := NewKeymap(1, "KM")
-	km.AddSample([]int16{100, 200, 150}, 60, 60, 60, 8, false)
+	km.AddSample([]int16{100, 200, 150}, 60, 60, 60, 2, false)
 	f.AddKeymap(km)
 
 	p := NewProgram(1, "Prog", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
@@ -351,8 +435,8 @@ func TestProgram_InKRZFile(t *testing.T) {
 	if len(data) == 0 {
 		t.Error("serialized KRZ file is empty")
 	}
-	// Magic bytes check
-	expected := []byte{0x4B, 0x52, 0x5A, 0x00}
+	// Magic bytes check ("PRAM")
+	expected := []byte{'P', 'R', 'A', 'M'}
 	for i, b := range expected {
 		if data[i] != b {
 			t.Errorf("magic byte[%d] = 0x%02x, want 0x%02x", i, data[i], b)

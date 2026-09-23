@@ -159,6 +159,7 @@ type KRZConfig struct {
 	Stereo         bool        // Enable stereo voice mode (for poly patches)
 	Envelope       Envelope    // Custom ADSR envelope
 	EnvelopePreset string      // Envelope preset name (drum, perc, pad, key)
+	Model          uint16      // Target Kurzweil model ID; 0 = default (PC2/PC3, 0x0064)
 	Layers         []LayerConfig
 }
 

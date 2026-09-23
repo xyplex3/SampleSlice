@@ -137,8 +137,9 @@ func (f *KRZFile) Serialize() ([]byte, error) {
 	ew := &errWriter{w: &buf}
 
 	// ---- File Header (16 bytes) ----
-	// Magic bytes "KRZ" + null
-	ew.writeBytes([]byte{0x4B, 0x52, 0x5A, 0x00}) // "KRZ\0"
+	// Magic bytes "PRAM" (the K2000's battery-backed Program RAM, confirmed
+	// via the official service manual and independent K2000 user reports).
+	ew.writeBytes([]byte{0x50, 0x52, 0x41, 0x4D}) // "PRAM"
 
 	// Version
 	ew.write(f.Version)
@@ -160,8 +161,13 @@ func (f *KRZFile) Serialize() ([]byte, error) {
 	}
 
 	// ---- Object Table ----
-	// Calculate offset to first object data (header + table)
-	headerSize := 16
+	// Calculate offset to first object data (header + table). headerSize must
+	// match exactly what was written above: magic(4) + version(2) +
+	// modelCount(2) + models(2*len) + objCount(2). It cannot be a fixed
+	// constant because len(f.Models) varies (e.g. via WithModels) — a fixed
+	// value here would silently desync the recorded table offsets from where
+	// object data actually starts.
+	headerSize := 4 + 2 + 2 + 2*len(f.Models) + 2
 	tableEntrySize := 6 // 2 bytes hash + 4 bytes offset
 	tableSize := int(objCount) * tableEntrySize
 	firstObjectOffset := headerSize + tableSize
@@ -284,6 +290,11 @@ type SliceData struct {
 // Each option modifies a createConfig field before file generation.
 type CreateOption func(*createConfig)
 
+// baseUserObjectID is the first object ID in the K2000's user/RAM object
+// space; IDs 0-199 are reserved for ROM/factory banks (confirmed via the
+// K2000/K2000RS service manual's memory-bank documentation).
+const baseUserObjectID = 200
+
 // createConfig holds the configuration for CreateFromSlices.
 type createConfig struct {
 	fileName  string
@@ -293,6 +304,7 @@ type createConfig struct {
 	priority  uint8
 	stereo    bool
 	envelope  Envelope
+	models    []uint16
 }
 
 // defaultCreateConfig returns a createConfig with sensible defaults.
@@ -357,6 +369,16 @@ func WithEnvelope(envelope Envelope) CreateOption {
 	}
 }
 
+// WithModels overrides the list of Kurzweil model IDs the file declares
+// itself compatible with (default: PC2/PC3, 0x0064). Set this to target a
+// specific unit, e.g. a K2000/K2VX-family model, when the default isn't
+// compatible with the destination hardware.
+func WithModels(models []uint16) CreateOption {
+	return func(c *createConfig) {
+		c.models = models
+	}
+}
+
 // CreateFromSlices creates a KRZ file from sliced audio data.
 //
 // Parameters:
@@ -382,12 +404,17 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 	}
 
 	krz := NewKRZFile(cfg.version)
+	if len(cfg.models) > 0 {
+		krz.Models = cfg.models
+	}
 
-	// Create a single keymap with all slices as samples
-	keymap := NewKeymap(1, truncateName("SliceKeymap", 16))
+	// Create a single keymap with all slices as samples. Object IDs start at
+	// baseUserObjectID (200): 0-199 are reserved for ROM/factory objects.
+	keymap := NewKeymap(baseUserObjectID, truncateName("SliceKeymap", 16))
 
-	// Determine sample format
-	sampleFormat := 8 // default 8-bit unsigned
+	// Determine sample format. 2 = 16-bit signed (full quality, the native
+	// precision of SliceData.Samples); 3 = ADPCM when compression is requested.
+	sampleFormat := 2
 	if cfg.compress {
 		sampleFormat = 3 // ADPCM
 	}
@@ -395,9 +422,6 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 	// Add each slice as a sample in the keymap
 	for _, s := range slices {
 		rootNote := validateMidiNote(s.Note)
-		if s.Note == 0 {
-			rootNote = 60 // default to C4
-		}
 
 		keymap.AddSample(
 			s.Samples,
@@ -413,7 +437,7 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 
 	// Create a program that references the keymap
 	programName := truncateName(cfg.fileName, 16)
-	program := NewProgram(1, programName, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope)
+	program := NewProgram(baseUserObjectID, programName, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope)
 
 	// Create a single part that uses the keymap
 	part := Part{

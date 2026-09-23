@@ -13,14 +13,14 @@ func TestGenerateHash(t *testing.T) {
 		objectType uint16
 		want       uint16
 	}{
-		{"keymap id 1", 1, T_KEYMAP, 0x8201},
-		{"keymap id 0", 0, T_KEYMAP, 0x8200},
-		{"keymap id 255", 255, T_KEYMAP, 0x82FF},
+		{"keymap id 1", 1, T_KEYMAP, 0x8501},
+		{"keymap id 0", 0, T_KEYMAP, 0x8500},
+		{"keymap id 255", 255, T_KEYMAP, 0x85FF},
 		{"program id 1", 1, T_PROGRAM, 0x8401},
 		{"program id 2", 2, T_PROGRAM, 0x8402},
 		{"effect id 1", 1, T_EFFECT, 0x7101},
-		{"id truncated to low byte", 256, T_KEYMAP, 0x8200}, // 256 & 0xFF = 0
-		{"id 1000 low byte 0xE8", 1000, T_KEYMAP, 0x82E8},
+		{"id truncated to low byte", 256, T_KEYMAP, 0x8500}, // 256 & 0xFF = 0
+		{"id 1000 low byte 0xE8", 1000, T_KEYMAP, 0x85E8},
 		{"setup type", 1, T_SETUP, 0x8701},
 		{"zero id and type", 0, 0, 0x0000},
 	}

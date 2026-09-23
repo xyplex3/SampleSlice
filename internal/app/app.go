@@ -253,7 +253,7 @@ func generateKRZPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 		krzSlices = krzSlices[:128]
 	}
 
-	krzData, err := krz.CreateFromSlices(krzSlices,
+	krzOpts := []krz.CreateOption{
 		krz.WithFileName(programName),
 		krz.WithVersion(krzVersion),
 		krz.WithCompression(cfg.KRZ.Compress),
@@ -261,7 +261,12 @@ func generateKRZPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 		krz.WithPriority(cfg.KRZ.Priority),
 		krz.WithStereo(cfg.KRZ.Stereo),
 		krz.WithEnvelope(envelope),
-	)
+	}
+	if cfg.KRZ.Model != 0 {
+		krzOpts = append(krzOpts, krz.WithModels([]uint16{cfg.KRZ.Model}))
+	}
+
+	krzData, err := krz.CreateFromSlices(krzSlices, krzOpts...)
 	if err != nil {
 		return fmt.Errorf("creating KRZ file for %q: %w", programName, err)
 	}

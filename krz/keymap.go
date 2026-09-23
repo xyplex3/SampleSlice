@@ -61,13 +61,20 @@ func (k *Keymap) AddSample(sampleData []int16, rootNote uint16, loKey uint16, hi
 	loKey = validateMidiNoteUint(loKey)
 	hiKey = validateMidiNoteUint(hiKey)
 
-	// Convert sample data to KRZ format
+	// Convert sample data to KRZ format. sampleFormat is the SampleBlock.Format
+	// code (0=8-bit unsigned, 2=16-bit signed, 3=ADPCM), not a bit depth, so it
+	// must be mapped to the bit depth ConvertWAVToKRZFormat expects.
+	bitsPerSample := 8
+	if sampleFormat == 2 {
+		bitsPerSample = 16
+	}
+
 	var rawData []byte
 	if compress {
 		// For ADPCM, first convert to 8-bit unsigned
 		rawData = ConvertWAVToKRZFormat(sampleData, 8)
 	} else {
-		rawData = ConvertWAVToKRZFormat(sampleData, sampleFormat)
+		rawData = ConvertWAVToKRZFormat(sampleData, bitsPerSample)
 	}
 
 	block := SampleBlock{
