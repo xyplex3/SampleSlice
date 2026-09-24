@@ -30,9 +30,9 @@ var fileHeaderTail = []byte{
 // section (samples, keymaps, and programs, in that declaration order), and
 // a shared PCM data region that Sample objects address by word offset.
 type KRZFile struct {
-	Samples  []*Sample
-	Keymaps  []*Keymap
-	Programs []*Program
+	Samples  []*Sample  // Sample objects, serialized first
+	Keymaps  []*Keymap  // Keymap objects, serialized after all Samples
+	Programs []*Program // Program objects, serialized last
 }
 
 // NewKRZFile creates an empty KRZ file.
@@ -156,6 +156,7 @@ type createConfig struct {
 	stereo     bool
 	envelope   Envelope
 	sampleRate uint32
+	vast       *VAST
 }
 
 // defaultCreateConfig returns a createConfig with sensible defaults.
@@ -197,6 +198,16 @@ func WithVoiceMode(mode VoiceMode) CreateOption {
 	}
 }
 
+// WithVAST borrows a real Program's tone-shaping segments (envelope,
+// algorithm, and filter/pan/amp blocks — see [LoadVAST]) and applies them
+// to every Program this call generates. An explicit WithEnvelope still
+// takes precedence over the donor's own envelope.
+func WithVAST(v *VAST) CreateOption {
+	return func(c *createConfig) {
+		c.vast = v
+	}
+}
+
 // WithPriority sets the voice priority (1-8). Currently a no-op; see the
 // Envelope doc comment in program.go.
 func WithPriority(priority uint8) CreateOption {
@@ -213,8 +224,8 @@ func WithStereo(stereo bool) CreateOption {
 	}
 }
 
-// WithEnvelope sets the ADSR envelope. Currently a no-op; see the Envelope
-// doc comment in program.go.
+// WithEnvelope sets the ADSR envelope, patched into the Program's 0x21
+// amplitude-envelope segment. See the Envelope doc comment in program.go.
 func WithEnvelope(envelope Envelope) CreateOption {
 	return func(c *createConfig) {
 		c.envelope = envelope
@@ -272,7 +283,9 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 		file.AddSample(sample)
 
 		file.AddKeymap(NewSingleSampleKeymap(id, name, id))
-		file.AddProgram(NewProgram(id, name, id, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope))
+		prog := NewProgram(id, name, id, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope)
+		prog.VAST = cfg.vast
+		file.AddProgram(prog)
 
 		if int(note) < len(masterKeymap.entries) {
 			masterKeymap.SetEntry(int(note), id)
@@ -280,7 +293,9 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 	}
 
 	file.AddKeymap(masterKeymap)
-	file.AddProgram(NewProgram(masterID, truncateName(cfg.fileName, 16), masterID, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope))
+	masterProg := NewProgram(masterID, truncateName(cfg.fileName, 16), masterID, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope)
+	masterProg.VAST = cfg.vast
+	file.AddProgram(masterProg)
 
 	return file.Serialize()
 }

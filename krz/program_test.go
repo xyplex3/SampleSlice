@@ -47,10 +47,10 @@ func TestProgram_Serialize_KeymapReference(t *testing.T) {
 
 // TestProgram_Serialize_TemplateUnchangedElsewhere verifies that only the
 // hash, name, and keymap-reference field differ between two Program objects
-// with different IDs/names/keymap refs — matching the real-file evidence
-// that the rest of the 280-byte object is a reusable constant template.
+// with different IDs/names/keymap refs (same envelope) — matching the
+// real-file evidence that the rest of the object is a reusable constant template.
 func TestProgram_Serialize_TemplateUnchangedElsewhere(t *testing.T) {
-	p1 := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, DefaultDrumEnvelope())
+	p1 := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, DefaultPolyEnvelope())
 	p2 := NewProgram(202, "kick002", 202, VoiceModePoly, 5, true, DefaultPolyEnvelope())
 
 	obj1 := p1.Serialize()
@@ -74,6 +74,73 @@ func TestProgram_Serialize_TemplateUnchangedElsewhere(t *testing.T) {
 	}
 }
 
+// TestProgram_Serialize_EnvelopePatch verifies that WithEnvelope's values
+// land field-for-field in the 0x21 AMPENV segment, that the reserved byte
+// (which has no config field) always stays 0, and that an all-zero envelope
+// leaves the template's own shape untouched.
+func TestProgram_Serialize_EnvelopePatch(t *testing.T) {
+	e := Envelope{
+		Att1Level: 100, Att1Time: 10,
+		Att2Level: 20, Att2Time: 15,
+		Att3Level: 40, Att3Time: 35,
+		Dec1Level: 70, Dec1Time: 40,
+		Rel1Level: 30, Rel1Time: 60,
+		Rel2Level: 50, Rel2Time: 80,
+		Rel3Time: 25,
+	}
+	p := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, e)
+	obj := p.Serialize()
+
+	if got := obj[26+ampEnvLoopOffset]; got != 0 {
+		t.Errorf("loop flag = %d, want 0", got)
+	}
+
+	type fieldOffset struct {
+		name string
+		off  int
+		want byte
+	}
+	fields := []fieldOffset{
+		{"Att1Level", ampEnvAtt1LevelOffset, 100},
+		{"Att1Time", ampEnvAtt1TimeOffset, 10},
+		{"Att2Level", ampEnvAtt2LevelOffset, 20},
+		{"Att2Time", ampEnvAtt2TimeOffset, 15},
+		{"Att3Level", ampEnvAtt3LevelOffset, 40},
+		{"Att3Time", ampEnvAtt3TimeOffset, 35},
+		{"Dec1Level", ampEnvDec1LevelOffset, 70},
+		{"Dec1Time", ampEnvDec1TimeOffset, 40},
+		{"Rel1Level", ampEnvRel1LevelOffset, 30},
+		{"Rel1Time", ampEnvRel1TimeOffset, 60},
+		{"Rel2Level", ampEnvRel2LevelOffset, 50},
+		{"Rel2Time", ampEnvRel2TimeOffset, 80},
+		{"Reserved", ampEnvReservedOffset, 0},
+		{"Rel3Time", ampEnvRel3TimeOffset, 25},
+	}
+	for _, f := range fields {
+		if got := obj[26+f.off]; got != f.want {
+			t.Errorf("%s = %d, want %d", f.name, got, f.want)
+		}
+	}
+
+	empty := Envelope{}
+	p0 := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, empty)
+	obj0 := p0.Serialize()
+	for _, f := range fields {
+		if f.name == "Reserved" {
+			continue // always 0 regardless of the template
+		}
+		if obj0[26+f.off] != programTemplate[f.off] {
+			t.Errorf("%s: empty envelope should leave the template untouched", f.name)
+		}
+	}
+
+	pClamp := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, Envelope{Dec1Level: 200})
+	objClamp := pClamp.Serialize()
+	if lvl := objClamp[26+ampEnvDec1LevelOffset]; lvl != 100 {
+		t.Errorf("clamped level = %d, want 100", lvl)
+	}
+}
+
 func TestProgram_Hash(t *testing.T) {
 	p := NewProgram(200, "DRM02", 200, VoiceModeDrum, 1, false, DefaultDrumEnvelope())
 	want := GenerateHash(200, T_PROGRAM)
@@ -84,14 +151,14 @@ func TestProgram_Hash(t *testing.T) {
 
 func TestDefaultDrumEnvelope(t *testing.T) {
 	e := DefaultDrumEnvelope()
-	if e.Attack != 0 || e.Decay1 != 20 || e.Release != 5 {
+	if e.Att1Level != 100 || e.Att1Time != 0 || e.Dec1Time != 20 || e.Rel1Time != 5 {
 		t.Errorf("unexpected drum envelope defaults: %+v", e)
 	}
 }
 
 func TestDefaultPolyEnvelope(t *testing.T) {
 	e := DefaultPolyEnvelope()
-	if e.Attack != 5 || e.Release != 40 {
+	if e.Att1Time != 5 || e.Rel1Time != 40 {
 		t.Errorf("unexpected poly envelope defaults: %+v", e)
 	}
 }

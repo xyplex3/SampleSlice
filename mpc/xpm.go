@@ -14,37 +14,37 @@ import (
 // XPMDocument is the root element of an Akai MPC .xpm XML program file.
 // It contains version metadata and the instrument definition.
 type XPMDocument struct {
-	XMLName    xml.Name      `xml:"MPCVObject"`
-	Version    XPMVersion    `xml:"Version"`
-	Instrument XPMInstrument `xml:"Instrument"`
+	XMLName    xml.Name      `xml:"MPCVObject"` // Root element name, fixed by the format
+	Version    XPMVersion    `xml:"Version"`    // File version and application metadata
+	Instrument XPMInstrument `xml:"Instrument"` // Program name and pad assignments
 }
 
 // XPMVersion carries the file version and application metadata written into
 // the .xpm header. MPC software uses these fields for compatibility checks.
 type XPMVersion struct {
-	FileVersion string `xml:"File_Version"`
-	Application string `xml:"Application"`
-	Platform    string `xml:"Platform"`
+	FileVersion string `xml:"File_Version"` // .xpm schema version, e.g. "2.1"
+	Application string `xml:"Application"`  // Name of the authoring application
+	Platform    string `xml:"Platform"`     // Target platform, e.g. "MPC"
 }
 
 // XPMInstrument is the drum-sampler instrument block inside an [XPMDocument].
 // It holds the program name and the complete pad assignment list.
 type XPMInstrument struct {
-	Type        string  `xml:"type,attr"`
-	ProgramName string  `xml:"ProgramName"`
-	Pads        XPMPads `xml:"Pads"`
+	Type        string  `xml:"type,attr"`   // Instrument type, e.g. "MPC_DRUM_SAMPLER"
+	ProgramName string  `xml:"ProgramName"` // Display name of the program
+	Pads        XPMPads `xml:"Pads"`        // Pad assignment list
 }
 
 // XPMPads is the container element for the pad list inside an [XPMInstrument].
 type XPMPads struct {
-	Pad []XPMPad `xml:"Pad"`
+	Pad []XPMPad `xml:"Pad"` // One entry per assigned pad
 }
 
 // XPMPad maps a single MPC pad number to its sample layer assignment.
 // Number is zero-based and corresponds to the pad's position in the program.
 type XPMPad struct {
-	Number int      `xml:"number,attr"`
-	Layer  XPMLayer `xml:"Layer"`
+	Number int      `xml:"number,attr"` // Zero-based pad position
+	Layer  XPMLayer `xml:"Layer"`       // Sample assignment and playback parameters
 }
 
 // XPMLayer describes the sample assignment and playback parameters for one
@@ -52,10 +52,10 @@ type XPMPad struct {
 // tuning is in cents. SampleStart and SampleEnd are frame offsets within the
 // referenced WAV file; –1 disables loop points.
 type XPMLayer struct {
-	Number        int     `xml:"number,attr"`
-	SampleName    string  `xml:"SampleName"`
-	SampleFile    string  `xml:"SampleFile"`
-	Active        int     `xml:"Active"`
+	Number        int     `xml:"number,attr"` // Zero-based layer index (always 0: one layer per pad)
+	SampleName    string  `xml:"SampleName"`  // Display name of the sample
+	SampleFile    string  `xml:"SampleFile"`  // Path to the WAV file, relative to the .xpm file
+	Active        int     `xml:"Active"`      // 1 if the layer is enabled, 0 otherwise
 	Volume        int     `xml:"Volume"`
 	Pan           int     `xml:"Pan"`
 	Tuning        int     `xml:"Tuning"`
@@ -64,7 +64,7 @@ type XPMLayer struct {
 	VolumeDecay   float64 `xml:"VolumeDecay"`
 	VolumeSustain int     `xml:"VolumeSustain"`
 	VolumeRelease float64 `xml:"VolumeRelease"`
-	PlaybackMode  string  `xml:"PlaybackMode"`
+	PlaybackMode  string  `xml:"PlaybackMode"` // e.g. "ONE_SHOT"
 	SampleStart   int     `xml:"SampleStart"`
 	SampleEnd     int     `xml:"SampleEnd"`
 	LoopStart     int     `xml:"LoopStart"`

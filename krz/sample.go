@@ -51,7 +51,11 @@ func (s *Sample) maxPitch() int16 {
 // Binary layout of the object-specific payload (70 bytes), all fields
 // confirmed against real files except where noted:
 //
-//	0:2   reserved, always 0x0053 in every real file observed
+//	0:2   name continuation  = 0x0053 ('\0' + 'S'): the K2000's name field
+//	      is 18 bytes, not 16 — these are its last 2 bytes, and every
+//	      object type stamps them with '\0' + its own initial (confirmed
+//	      against the "kurzfile" Python library's header parsing, which
+//	      independently corroborates this package's whole object model)
 //	2:4   baseID            = 1
 //	4:6   numHeaders        = 0 (mono; this implementation is mono-only)
 //	6:8   headersOfs        = 8 (constant; not a live pointer in practice)

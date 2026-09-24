@@ -13,11 +13,11 @@ import (
 
 // WAVFile represents a parsed WAV file with metadata and PCM sample data.
 type WAVFile struct {
-	SampleRate  uint32
-	BitDepth    uint16
-	Channels    uint16
+	SampleRate  uint32    // Sample rate in Hz, from the source file's fmt chunk
+	BitDepth    uint16    // Source bit depth (16, 24, or 32) before normalization
+	Channels    uint16    // Source channel count before downmixing to mono
 	Data        []float64 // mono PCM data normalized to [-1, 1]
-	DurationSec float64
+	DurationSec float64   // Duration of Data in seconds
 }
 
 // ReadWAV reads and parses a WAV file, returning a WAVFile struct.
@@ -185,12 +185,12 @@ func decodePCM(data []byte, channels uint16, bitsPerSample uint16) ([]float64, e
 // Stats holds read-only summary statistics for a WAV file.
 // Use [WAVFile.GetStats] to obtain a Stats from a parsed [WAVFile].
 type Stats struct {
-	Path        string  `json:"path"`
-	SampleRate  uint32  `json:"sample_rate"`
-	BitDepth    uint16  `json:"bit_depth"`
-	Channels    uint16  `json:"channels"`
-	DurationSec float64 `json:"duration_sec"`
-	SampleCount int     `json:"sample_count"`
+	Path        string  `json:"path"`         // Reported source file path
+	SampleRate  uint32  `json:"sample_rate"`  // Sample rate in Hz
+	BitDepth    uint16  `json:"bit_depth"`    // Source bit depth (16, 24, or 32)
+	Channels    uint16  `json:"channels"`     // Source channel count
+	DurationSec float64 `json:"duration_sec"` // Duration in seconds
+	SampleCount int     `json:"sample_count"` // Number of mono PCM samples
 }
 
 // GetStats returns a [Stats] summary for the WAV file, using path as the

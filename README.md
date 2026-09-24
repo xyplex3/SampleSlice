@@ -213,12 +213,18 @@ the program file.
 # Built-in envelope presets: drum, perc, pad, key
 ./sampleslice --input loop.wav --format krz --envelope-preset perc
 
-# Raw envelope (9 values 0–255): attack,decay1,level1,decay2,level2,
-#                                decay3,level3,sustain,release
-./sampleslice --input loop.wav --format krz --envelope "0,200,0,0,0,0,0,0,50"
+# Raw envelope (13 values 0-255): att1level,att1time,att2level,att2time,
+#   att3level,att3time,dec1level,dec1time,rel1level,rel1time,rel2level,
+#   rel2time,rel3time
+./sampleslice --input loop.wav --format krz --envelope "100,0,0,0,0,0,0,10,0,0,0,0,5"
 
 # Voice priority 1–8 (default: 7 for drum, 3 for poly)
 ./sampleslice --input loop.wav --format krz --priority 5
+
+# Borrow a real patch's VAST tone (algorithm + filter/pan/amp settings)
+# from an existing KRZ file and apply it to your sliced samples
+./sampleslice --input loop.wav --format krz \
+  --vast-from "MyLibrary.krz" --vast-program "Kick 909"
 ```
 
 ## Configuration
@@ -286,8 +292,10 @@ config file → built-in defaults.
 | `--voice-mode` | | `drum` | KRZ voice mode: `drum` or `poly` |
 | `--priority` | | `7`/`3` | KRZ voice priority (1–8) |
 | `--stereo` | | `false` | Stereo KRZ voice mode (poly only) |
-| `--envelope` | | | Raw envelope: 9 comma-separated values (0–255) |
+| `--envelope` | | | Raw envelope: 13 comma-separated values (0–255) |
 | `--envelope-preset` | | | Envelope preset: `drum`, `perc`, `pad`, `key` |
+| `--vast-from` | | | Path to an existing KRZ file to borrow a VAST tone from |
+| `--vast-program` | | | Program name within `--vast-from` to borrow (used together) |
 | `--config` | | `~/.sampleslice.yaml` | Config file path |
 
 ## Shell completion

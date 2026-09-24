@@ -36,71 +36,60 @@ type LayerConfig struct {
 	Output   uint8    // Output routing (1-8)
 }
 
-// Envelope holds ADSR envelope values for a KRZ layer.
+// Envelope holds a KRZ amplitude envelope shape, matching the real K2000
+// AMPENV segment's own layout field-for-field (confirmed against Geoffrey
+// Mayer's Kurzweil K2000/K2500/K2600 file format reference): three attack
+// stages, one decay stage, and three release stages. Level fields are
+// unsigned percentages (0-100); time fields are raw AMPENV time-table
+// values (0 = instant, ~0.02s per step through the middle of the range,
+// tapering non-linearly toward 60s at the top of the byte range). There is
+// no separate Rel3 level — the envelope simply reaches silence by the end
+// of Rel3Time.
 type Envelope struct {
-	Attack  uint8
-	Decay1  uint8
-	Level1  uint8
-	Decay2  uint8
-	Level2  uint8
-	Decay3  uint8
-	Level3  uint8
-	Sustain uint8
-	Release uint8
+	Att1Level uint8 // Level reached at the end of attack stage 1 (0-100%)
+	Att1Time  uint8 // Time for attack stage 1
+	Att2Level uint8 // Level reached at the end of attack stage 2 (0-100%)
+	Att2Time  uint8 // Time for attack stage 2
+	Att3Level uint8 // Level reached at the end of attack stage 3 (0-100%)
+	Att3Time  uint8 // Time for attack stage 3
+	Dec1Level uint8 // Level reached at the end of the decay stage (0-100%)
+	Dec1Time  uint8 // Time for the decay stage
+	Rel1Level uint8 // Level reached at the end of release stage 1 (0-100%)
+	Rel1Time  uint8 // Time for release stage 1
+	Rel2Level uint8 // Level reached at the end of release stage 2 (0-100%)
+	Rel2Time  uint8 // Time for release stage 2
+	Rel3Time  uint8 // Time for the final release stage, down to silence
 }
 
 // IsEmpty reports whether all envelope fields are zero (the default unset state).
 func (e *Envelope) IsEmpty() bool {
-	return e.Attack == 0 && e.Decay1 == 0 && e.Level1 == 0 &&
-		e.Decay2 == 0 && e.Level2 == 0 && e.Decay3 == 0 &&
-		e.Level3 == 0 && e.Sustain == 0 && e.Release == 0
+	return *e == Envelope{}
 }
 
-// EnvelopePresets defines standard envelope shapes
+// EnvelopePresets defines standard envelope shapes, keyed by preset name.
+// Valid keys are "drum", "perc", "pad", and "key"; see [GetEnvelopePreset].
 var EnvelopePresets = map[string]Envelope{
+	// Instant full-level attack, quick decay to silence: one-shot drum hits.
 	"drum": {
-		Attack:  0,
-		Decay1:  200,
-		Level1:  0,
-		Decay2:  0,
-		Level2:  0,
-		Decay3:  0,
-		Level3:  0,
-		Sustain: 0,
-		Release: 0,
+		Att1Level: 100, Att1Time: 0,
+		Dec1Level: 0, Dec1Time: 10,
 	},
+	// Like "drum" but with a slightly longer decay tail.
 	"perc": {
-		Attack:  0,
-		Decay1:  100,
-		Level1:  0,
-		Decay2:  0,
-		Level2:  0,
-		Decay3:  0,
-		Level3:  0,
-		Sustain: 0,
-		Release: 0,
+		Att1Level: 100, Att1Time: 0,
+		Dec1Level: 0, Dec1Time: 20,
 	},
+	// Slow attack, sustained body, long release: pads and sustained tones.
 	"pad": {
-		Attack:  100,
-		Decay1:  150,
-		Level1:  200,
-		Decay2:  100,
-		Level2:  180,
-		Decay3:  50,
-		Level3:  160,
-		Sustain: 200,
-		Release: 100,
+		Att1Level: 100, Att1Time: 100,
+		Dec1Level: 80, Dec1Time: 50,
+		Rel1Level: 0, Rel1Time: 100,
 	},
+	// Moderate attack and decay: keyboard/mallet-style hits.
 	"key": {
-		Attack:  0,
-		Decay1:  80,
-		Level1:  180,
-		Decay2:  50,
-		Level2:  160,
-		Decay3:  30,
-		Level3:  140,
-		Sustain: 180,
-		Release: 50,
+		Att1Level: 100, Att1Time: 10,
+		Dec1Level: 70, Dec1Time: 30,
+		Rel1Level: 0, Rel1Time: 40,
 	},
 }
 
@@ -111,14 +100,17 @@ func GetEnvelopePreset(name string) (Envelope, bool) {
 	return e, ok
 }
 
-// ParseEnvelope parses a comma-separated string of 9 uint8 values into an Envelope.
-// Format: "attack,decay1,level1,decay2,level2,decay3,level3,sustain,release" (values 0-255)
+// ParseEnvelope parses a comma-separated string of 13 uint8 values into an
+// Envelope. Format: "att1level,att1time,att2level,att2time,att3level,
+// att3time,dec1level,dec1time,rel1level,rel1time,rel2level,rel2time,
+// rel3time" (values 0-255)
 func ParseEnvelope(s string) (Envelope, error) {
+	const fieldList = "att1level,att1time,att2level,att2time,att3level,att3time,dec1level,dec1time,rel1level,rel1time,rel2level,rel2time,rel3time"
 	parts := strings.Split(s, ",")
-	if len(parts) != 9 {
-		return Envelope{}, fmt.Errorf("expected 9 comma-separated values (attack,decay1,level1,decay2,level2,decay3,level3,sustain,release), got %d", len(parts))
+	if len(parts) != 13 {
+		return Envelope{}, fmt.Errorf("expected 13 comma-separated values (%s), got %d", fieldList, len(parts))
 	}
-	vals := make([]uint8, 9)
+	vals := make([]uint8, 13)
 	for i, p := range parts {
 		p = strings.TrimSpace(p)
 		var n int
@@ -131,15 +123,13 @@ func ParseEnvelope(s string) (Envelope, error) {
 		vals[i] = uint8(n)
 	}
 	return Envelope{
-		Attack:  vals[0],
-		Decay1:  vals[1],
-		Level1:  vals[2],
-		Decay2:  vals[3],
-		Level2:  vals[4],
-		Decay3:  vals[5],
-		Level3:  vals[6],
-		Sustain: vals[7],
-		Release: vals[8],
+		Att1Level: vals[0], Att1Time: vals[1],
+		Att2Level: vals[2], Att2Time: vals[3],
+		Att3Level: vals[4], Att3Time: vals[5],
+		Dec1Level: vals[6], Dec1Time: vals[7],
+		Rel1Level: vals[8], Rel1Time: vals[9],
+		Rel2Level: vals[10], Rel2Time: vals[11],
+		Rel3Time: vals[12],
 	}, nil
 }
 
@@ -151,36 +141,43 @@ type DetectionConfig struct {
 }
 
 // KRZConfig groups Kurzweil KRZ-specific output parameters.
+//
+// Envelope is wired into the generated Program's amplitude envelope (see
+// package krz). VoiceMode, Priority, Stereo, and Compress are still
+// accepted for CLI/API compatibility but do not yet change the generated
+// KRZ bytes — see the Envelope doc comment in package krz.
 type KRZConfig struct {
-	Version        uint16    // KRZ file format version (default: 2000)
-	Compress       bool      // Use ADPCM compression for KRZ samples
-	VoiceMode      VoiceMode // drum or poly
-	Priority       uint8     // Voice priority 1-8
-	Stereo         bool      // Enable stereo voice mode (for poly patches)
-	Envelope       Envelope  // Custom ADSR envelope
-	EnvelopePreset string    // Envelope preset name (drum, perc, pad, key)
-	Layers         []LayerConfig
+	Version        uint16        // KRZ file format version (default: 2000)
+	Compress       bool          // Reserved; not yet wired to KRZ output
+	VoiceMode      VoiceMode     // drum or poly
+	Priority       uint8         // Voice priority 1-8
+	Stereo         bool          // Enable stereo voice mode (for poly patches)
+	Envelope       Envelope      // Custom ADSR envelope
+	EnvelopePreset string        // Envelope preset name (drum, perc, pad, key)
+	VASTFrom       string        // Path to an existing KRZ file to borrow a VAST tone from
+	VASTProgram    string        // Name of the program within VASTFrom to borrow
+	Layers         []LayerConfig // Per-layer overrides for multi-layer KRZ programs
 }
 
 // Config holds all configuration options for SampleSlice.
 type Config struct {
 	// Input/Output
-	InputPath   string
-	OutputDir   string
-	ProgramName string
-	Format      OutputFormat
+	InputPath   string       // Path to the source WAV file
+	OutputDir   string       // Destination directory for generated output
+	ProgramName string       // User-supplied program name (combined with the input file's base name)
+	Format      OutputFormat // Output format: mpc, krz, both, or xpm
 
 	// Slicing / output settings
-	RootNote            int
-	PrePadding          int
-	PostPadding         int
-	GMMap               bool
-	NoteMap             []string
-	SimilarityThreshold float64 // 0=disabled; 0.95=remove near-duplicates
+	RootNote            int      // Root MIDI note (0-127) assigned to the first slice
+	PrePadding          int      // Pre-transient padding, in milliseconds
+	PostPadding         int      // Post-transient padding, in milliseconds
+	GMMap               bool     // Use the General MIDI drum note layout instead of sequential notes
+	NoteMap             []string // Custom "index=note" assignments, e.g. "0=36,1=42"
+	SimilarityThreshold float64  // 0=disabled; 0.95=remove near-duplicates
 
 	// Post-extraction processing
-	Normalize      bool
-	AutoTrim       bool
+	Normalize      bool    // Peak-normalize each slice to 0 dBFS
+	AutoTrim       bool    // Strip leading/trailing silence from each slice
 	TrimNoiseFloor float64 // linear amplitude, default 0.001 (~-60 dBFS)
 
 	// Tempo-grid slicing (Feature 9)
@@ -237,6 +234,10 @@ func (c *Config) Validate() error {
 
 	if c.KRZ.VoiceMode != VoiceModeDrum && c.KRZ.VoiceMode != VoiceModePoly && c.KRZ.VoiceMode != "" {
 		return fmt.Errorf("voice mode must be 'drum' or 'poly'")
+	}
+
+	if (c.KRZ.VASTFrom == "") != (c.KRZ.VASTProgram == "") {
+		return fmt.Errorf("--vast-from and --vast-program must be used together")
 	}
 
 	for i, layer := range c.KRZ.Layers {

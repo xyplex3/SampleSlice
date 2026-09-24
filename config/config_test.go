@@ -36,6 +36,48 @@ func TestConfigValidate_ValidConfig(t *testing.T) {
 	}
 }
 
+// TestConfigValidate_VASTFromRequiresProgram verifies --vast-from and
+// --vast-program must be given together, not one without the other.
+func TestConfigValidate_VASTFromRequiresProgram(t *testing.T) {
+	base := config.Config{
+		InputPath: "./input.wav",
+		RootNote:  36,
+		Detection: config.DetectionConfig{Sensitivity: 0.5},
+	}
+
+	t.Run("only vast-from set", func(t *testing.T) {
+		cfg := base
+		cfg.KRZ.VASTFrom = "library.krz"
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error when --vast-from is set without --vast-program")
+		}
+	})
+
+	t.Run("only vast-program set", func(t *testing.T) {
+		cfg := base
+		cfg.KRZ.VASTProgram = "Kick 909"
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error when --vast-program is set without --vast-from")
+		}
+	})
+
+	t.Run("both set", func(t *testing.T) {
+		cfg := base
+		cfg.KRZ.VASTFrom = "library.krz"
+		cfg.KRZ.VASTProgram = "Kick 909"
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error with both set: %v", err)
+		}
+	})
+
+	t.Run("neither set", func(t *testing.T) {
+		cfg := base
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected error with neither set: %v", err)
+		}
+	})
+}
+
 // TestConfigValidate_SensitivityBounds verifies sensitivity must be in [0.0, 1.0].
 func TestConfigValidate_SensitivityBounds(t *testing.T) {
 	tests := []struct {
@@ -242,11 +284,11 @@ func TestGetEnvelopePreset_DrumValues(t *testing.T) {
 	if !ok {
 		t.Fatal("drum preset not found")
 	}
-	if e.Attack != 0 {
-		t.Errorf("drum Attack = %d, want 0", e.Attack)
+	if e.Att1Level != 100 {
+		t.Errorf("drum Att1Level = %d, want 100", e.Att1Level)
 	}
-	if e.Decay1 != 200 {
-		t.Errorf("drum Decay1 = %d, want 200", e.Decay1)
+	if e.Dec1Time != 10 {
+		t.Errorf("drum Dec1Time = %d, want 10", e.Dec1Time)
 	}
 }
 
@@ -260,27 +302,31 @@ func TestParseEnvelope(t *testing.T) {
 	}{
 		{
 			name:  "all zeros",
-			input: "0,0,0,0,0,0,0,0,0",
+			input: "0,0,0,0,0,0,0,0,0,0,0,0,0",
 			want:  config.Envelope{},
 		},
 		{
 			name:  "all max values",
-			input: "255,255,255,255,255,255,255,255,255",
+			input: "255,255,255,255,255,255,255,255,255,255,255,255,255",
 			want: config.Envelope{
-				Attack: 255, Decay1: 255, Level1: 255,
-				Decay2: 255, Level2: 255, Decay3: 255,
-				Level3: 255, Sustain: 255, Release: 255,
+				Att1Level: 255, Att1Time: 255,
+				Att2Level: 255, Att2Time: 255,
+				Att3Level: 255, Att3Time: 255,
+				Dec1Level: 255, Dec1Time: 255,
+				Rel1Level: 255, Rel1Time: 255,
+				Rel2Level: 255, Rel2Time: 255,
+				Rel3Time: 255,
 			},
 		},
 		{
 			name:  "drum-like values",
-			input: "0,200,0,0,0,0,0,0,0",
-			want:  config.Envelope{Decay1: 200},
+			input: "100,0,0,0,0,0,0,10,0,0,0,0,0",
+			want:  config.Envelope{Att1Level: 100, Dec1Time: 10},
 		},
 		{
 			name:  "whitespace trimmed",
-			input: "0, 150, 0, 0, 0, 0, 0, 0, 30",
-			want:  config.Envelope{Decay1: 150, Release: 30},
+			input: "100, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 30",
+			want:  config.Envelope{Att1Level: 100, Dec1Time: 10, Rel3Time: 30},
 		},
 		{
 			name:    "too few values",
@@ -289,22 +335,22 @@ func TestParseEnvelope(t *testing.T) {
 		},
 		{
 			name:    "too many values",
-			input:   "1,2,3,4,5,6,7,8,9,10",
+			input:   "1,2,3,4,5,6,7,8,9,10,11,12,13,14",
 			wantErr: true,
 		},
 		{
 			name:    "value below zero",
-			input:   "-1,0,0,0,0,0,0,0,0",
+			input:   "-1,0,0,0,0,0,0,0,0,0,0,0,0",
 			wantErr: true,
 		},
 		{
 			name:    "value above 255",
-			input:   "256,0,0,0,0,0,0,0,0",
+			input:   "256,0,0,0,0,0,0,0,0,0,0,0,0",
 			wantErr: true,
 		},
 		{
 			name:    "non-numeric value",
-			input:   "abc,0,0,0,0,0,0,0,0",
+			input:   "abc,0,0,0,0,0,0,0,0,0,0,0,0",
 			wantErr: true,
 		},
 	}
@@ -331,13 +377,17 @@ func TestEnvelopeIsEmpty(t *testing.T) {
 		want bool
 	}{
 		{"all zeros", config.Envelope{}, true},
-		{"attack non-zero", config.Envelope{Attack: 1}, false},
-		{"release non-zero", config.Envelope{Release: 1}, false},
-		{"sustain non-zero", config.Envelope{Sustain: 128}, false},
+		{"att1 level non-zero", config.Envelope{Att1Level: 1}, false},
+		{"rel3 time non-zero", config.Envelope{Rel3Time: 1}, false},
+		{"rel1 level non-zero", config.Envelope{Rel1Level: 128}, false},
 		{"all fields set", config.Envelope{
-			Attack: 1, Decay1: 1, Level1: 1,
-			Decay2: 1, Level2: 1, Decay3: 1,
-			Level3: 1, Sustain: 1, Release: 1,
+			Att1Level: 1, Att1Time: 1,
+			Att2Level: 1, Att2Time: 1,
+			Att3Level: 1, Att3Time: 1,
+			Dec1Level: 1, Dec1Time: 1,
+			Rel1Level: 1, Rel1Time: 1,
+			Rel2Level: 1, Rel2Time: 1,
+			Rel3Time: 1,
 		}, false},
 	}
 

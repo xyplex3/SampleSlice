@@ -1,18 +1,22 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"sampleslice/config"
 	"sampleslice/krz"
+	"sampleslice/output"
 )
 
 // TestFloatToInt16 verifies float64-to-int16 conversion with clamping.
 func TestFloatToInt16(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   []float64
-		want    []int16
+		name  string
+		input []float64
+		want  []int16
 	}{
 		{
 			name:  "zero",
@@ -336,4 +340,201 @@ func TestResolveNote(t *testing.T) {
 			t.Errorf("got %d, want 0 (unrecognized note)", got)
 		}
 	})
+}
+
+// writeSilentWAV writes a mono 16-bit WAV of numSamples all-zero samples to
+// path, for use as deterministic Run() input: grid slicing only depends on
+// sample count and sample rate, never on signal content.
+func writeSilentWAV(t *testing.T, path string, sampleRate uint32, numSamples int) {
+	t.Helper()
+	if err := output.WriteWAV(path, make([]float64, numSamples), sampleRate); err != nil {
+		t.Fatalf("writeSilentWAV: %v", err)
+	}
+}
+
+// baseGridConfig returns a valid Config using beat-grid slicing (BPM > 0),
+// which is deterministic and does not depend on transient-detection energy
+// heuristics the way the default mode does.
+func baseGridConfig(inputPath, outputDir string) *config.Config {
+	return &config.Config{
+		InputPath:   inputPath,
+		OutputDir:   outputDir,
+		ProgramName: "Test",
+		Format:      config.FormatMPC,
+		RootNote:    48,
+		Detection:   config.DetectionConfig{Sensitivity: 0.5},
+		BPM:         120,
+		LoopBars:    1,
+		BeatsPerBar: 4,
+	}
+}
+
+// TestRun_MissingInputFile verifies Run reports a clear error when the input
+// WAV path does not exist, without attempting to create any output.
+func TestRun_MissingInputFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := baseGridConfig(filepath.Join(dir, "missing.wav"), filepath.Join(dir, "out"))
+
+	err := Run(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "does not exist")
+	}
+}
+
+// TestRun_InvalidConfig verifies Run surfaces config validation errors before
+// touching the filesystem.
+func TestRun_InvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := baseGridConfig(filepath.Join(dir, "in.wav"), filepath.Join(dir, "out"))
+	cfg.Detection.Sensitivity = 2.0 // out of the valid 0.0-1.0 range
+
+	err := Run(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "configuration error") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "configuration error")
+	}
+}
+
+// TestRun_NoTransientsFoundReturnsNil verifies that silent audio in the
+// default (transient-detection) mode produces no output and no error,
+// matching the "nothing to do" warning path in Run.
+func TestRun_NoTransientsFoundReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "silent.wav")
+	writeSilentWAV(t, wavPath, 8000, 4000)
+
+	outDir := filepath.Join(dir, "out")
+	cfg := baseGridConfig(wavPath, outDir)
+	cfg.BPM = 0 // use transient detection, not grid mode
+
+	if err := Run(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("expected output dir to not be created, stat err = %v", err)
+	}
+}
+
+// TestRun_GridSlicesTooShortReturnsNil verifies that audio shorter than half
+// a bar in grid mode produces no output and no error.
+func TestRun_GridSlicesTooShortReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "short.wav")
+	// 120 BPM, 4/4 at 8000 Hz -> 1 bar = 16000 samples, half a bar = 8000.
+	writeSilentWAV(t, wavPath, 8000, 1000)
+
+	outDir := filepath.Join(dir, "out")
+	cfg := baseGridConfig(wavPath, outDir)
+
+	if err := Run(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("expected output dir to not be created, stat err = %v", err)
+	}
+}
+
+// TestRun_UnsupportedFormat verifies Run rejects an unrecognized format
+// after successfully slicing, rather than silently defaulting.
+func TestRun_UnsupportedFormat(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "in.wav")
+	writeSilentWAV(t, wavPath, 8000, 20000)
+
+	cfg := baseGridConfig(wavPath, filepath.Join(dir, "out"))
+	cfg.Format = config.OutputFormat("bogus")
+
+	err := Run(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported output format") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "unsupported output format")
+	}
+}
+
+// TestRun_GridModeProducesOutput verifies a full successful run in beat-grid
+// mode for each output format, checking the expected files land on disk.
+func TestRun_GridModeProducesOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     config.OutputFormat
+		wantSuffix string // expected file suffix under the output dir
+	}{
+		{"mpc format writes xpm program", config.FormatMPC, ".xpm"},
+		{"krz format writes krz program", config.FormatKRZ, ".krz"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			wavPath := filepath.Join(dir, "in.wav")
+			// 120 BPM, 4/4 at 8000 Hz -> 1 bar = 16000 samples; use enough
+			// samples for exactly one slice with no leftover tail.
+			writeSilentWAV(t, wavPath, 8000, 20000)
+
+			outDir := filepath.Join(dir, "out")
+			cfg := baseGridConfig(wavPath, outDir)
+			cfg.Format = tt.format
+
+			if err := Run(cfg); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			entries, err := os.ReadDir(outDir)
+			if err != nil {
+				t.Fatalf("reading output dir: %v", err)
+			}
+			found := false
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), tt.wantSuffix) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				names := make([]string, len(entries))
+				for i, e := range entries {
+					names[i] = e.Name()
+				}
+				t.Errorf("no file ending in %q found in output dir; got %v", tt.wantSuffix, names)
+			}
+		})
+	}
+}
+
+// TestRun_ReportGeneratesFile verifies the --report option writes a report
+// file alongside the program output.
+func TestRun_ReportGeneratesFile(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "in.wav")
+	writeSilentWAV(t, wavPath, 8000, 20000)
+
+	outDir := filepath.Join(dir, "out")
+	cfg := baseGridConfig(wavPath, outDir)
+	cfg.ReportFormat = "json"
+
+	if err := Run(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("reading output dir: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), "_report.json") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected a _report.json file in the output dir")
+	}
 }

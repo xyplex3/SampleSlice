@@ -19,8 +19,8 @@ const keymapReserved = 0x004b
 //     its own 2-byte Program-ID reference (plus a 1-byte flag), used to
 //     dispatch a drum kit's top-level Program to the right per-hit voice.
 type Keymap struct {
-	ID   uint16
-	Name string
+	ID   uint16 // Object's numeric ID (>= 200 for user objects)
+	Name string // Display name, up to 16 bytes
 
 	multi    bool
 	sampleID uint16   // single-sample mode: the referenced Sample's ID
@@ -62,7 +62,9 @@ func (k *Keymap) Hash() uint16 {
 //
 // Payload layout (all fields confirmed against real files):
 //
-//	0:2   reserved       = keymapReserved
+//	0:2   name continuation = keymapReserved ('\0'+'K'): the last 2 bytes
+//	      of the K2000's 18-byte name field (see the Sample.Serialize doc
+//	      comment for how this was confirmed)
 //	2:4   sampleId       = referenced Sample ID (single-sample) or 0 (multi)
 //	4:6   method         = 1 (single-sample) or 3 (multi)
 //	6:8   basePitch      = 0

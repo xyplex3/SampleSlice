@@ -2,6 +2,7 @@ package krz
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"sampleslice/config"
 )
@@ -15,33 +16,26 @@ const (
 	VoiceModePoly                  // Multi-note polyphonic via sample rate modulation
 )
 
-// Envelope is the shared ASDR envelope type for KRZ layers.
-// It aliases config.Envelope so callers can pass config.Envelope values directly
-// without a conversion step.
+// Envelope is the shared amplitude-envelope type for KRZ layers. It aliases
+// config.Envelope, whose fields mirror the real K2000 AMPENV segment
+// field-for-field (see [config.Envelope]'s doc comment), so callers can pass
+// config.Envelope values directly without a conversion step.
 //
-// NOTE: Envelope, VoiceMode, priority and stereo are accepted by CreateFromSlices
-// for API compatibility, but none of them currently change the serialized
-// Program bytes. Program objects are built from a byte-for-byte template
-// captured from a real, working K2000 KRZ file (see programTemplate below);
-// which of its 254 bytes control voice mode / priority / envelope / stereo
-// has not been independently reverse-engineered yet. Until that mapping is
-// confirmed, every generated Program uses the template's own (drum, one-shot)
-// defaults regardless of these settings.
+// The field layout was confirmed against Geoffrey Mayer's Kurzweil
+// K2000/K2500/K2600 file format reference (the reverse-engineer's own
+// technical writeup) and cross-checked by diffing real Program objects.
+// WithEnvelope patches these bytes directly into the 0x21 AMPENV segment;
+// VoiceMode, priority, and stereo remain accepted for API compatibility but
+// do not yet change the serialized Program bytes.
 type Envelope = config.Envelope
 
 // DefaultDrumEnvelope returns a fast, tight envelope configuration optimized for percussive sounds
 // with quick attack, moderate decay, and short release.
 func DefaultDrumEnvelope() Envelope {
 	return Envelope{
-		Attack:  0,
-		Decay1:  20,
-		Level1:  70,
-		Decay2:  30,
-		Level2:  0,
-		Decay3:  0,
-		Level3:  0,
-		Sustain: 0,
-		Release: 5,
+		Att1Level: 100, Att1Time: 0,
+		Dec1Level: 0, Dec1Time: 20,
+		Rel1Level: 0, Rel1Time: 5,
 	}
 }
 
@@ -49,15 +43,9 @@ func DefaultDrumEnvelope() Envelope {
 // hits and pad sounds with gradual attack, multi-stage decay, and longer release.
 func DefaultPolyEnvelope() Envelope {
 	return Envelope{
-		Attack:  5,
-		Decay1:  40,
-		Level1:  70,
-		Decay2:  60,
-		Level2:  30,
-		Decay3:  80,
-		Level3:  0,
-		Sustain: 0,
-		Release: 40,
+		Att1Level: 100, Att1Time: 5,
+		Dec1Level: 60, Dec1Time: 40,
+		Rel1Level: 0, Rel1Time: 40,
 	}
 }
 
@@ -100,6 +88,32 @@ var programTemplate = []byte{
 // 2-byte big-endian Keymap ID this program references.
 const programKeymapRefOffset = 166
 
+// The 0x21 AMPENV (amplitude envelope) segment inside programTemplate: tag
+// at ampEnvSegOffset, then the loop flag, three attack (level, time) pairs,
+// one decay (level, time) pair, two release (level, time) pairs, a reserved
+// byte, and a final release time — matching config.Envelope field-for-field.
+// Offsets confirmed against Geoffrey Mayer's Kurzweil file format reference
+// and cross-checked against real Program objects.
+const (
+	ampEnvSegOffset  = 106
+	ampEnvLoopOffset = 107
+
+	ampEnvAtt1LevelOffset = 108
+	ampEnvAtt1TimeOffset  = 109
+	ampEnvAtt2LevelOffset = 110
+	ampEnvAtt2TimeOffset  = 111
+	ampEnvAtt3LevelOffset = 112
+	ampEnvAtt3TimeOffset  = 113
+	ampEnvDec1LevelOffset = 114
+	ampEnvDec1TimeOffset  = 115
+	ampEnvRel1LevelOffset = 116
+	ampEnvRel1TimeOffset  = 117
+	ampEnvRel2LevelOffset = 118
+	ampEnvRel2TimeOffset  = 119
+	ampEnvReservedOffset  = 120 // always 0: AMPENV has no Rel3 level byte
+	ampEnvRel3TimeOffset  = 121
+)
+
 // Program represents a Kurzweil Program object (T_PROGRAM): the object a
 // user actually selects to play a voice or drum kit. It references a
 // Keymap by ID; the Keymap in turn determines whether that Program plays a
@@ -112,14 +126,24 @@ type Program struct {
 	Name string
 	// KeymapID is the ID of the Keymap object this program references.
 	KeymapID uint16
+	// Envelope shapes the amplitude envelope (the 0x21 segment). An all-zero
+	// Envelope leaves the template's own (drum, one-shot) shape untouched.
+	Envelope Envelope
+	// VAST, if set, splices a donor Program's tone-shaping segments
+	// (envelope/Calvin/Hobbes) onto this one — see [LoadVAST]. Applied
+	// before Envelope and before the KeymapID patch, so an explicit
+	// Envelope still wins over a borrowed one, and the Calvin segment's
+	// keymap reference always ends up pointing at this Program's own
+	// KeymapID rather than the donor's.
+	VAST *VAST
 }
 
 // NewProgram creates a Program with the given ID, name, and Keymap
-// reference. voiceMode, priority, stereo, and envelope are accepted for API
+// reference. voiceMode, priority, and stereo are accepted for API
 // compatibility but do not currently affect the serialized bytes — see the
 // Envelope doc comment.
-func NewProgram(id uint16, name string, keymapID uint16, _ VoiceMode, _ uint8, _ bool, _ Envelope) *Program {
-	return &Program{ID: id, Name: name, KeymapID: keymapID}
+func NewProgram(id uint16, name string, keymapID uint16, _ VoiceMode, _ uint8, _ bool, envelope Envelope) *Program {
+	return &Program{ID: id, Name: name, KeymapID: keymapID, Envelope: envelope}
 }
 
 // Hash returns this program's object hash.
@@ -131,6 +155,50 @@ func (p *Program) Hash() uint16 {
 func (p *Program) Serialize() []byte {
 	payload := make([]byte, len(programTemplate))
 	copy(payload, programTemplate)
+	if p.VAST != nil {
+		// programTemplate always has every tag a VAST borrows (confirmed by
+		// TestParseSegments_RoundTripsProgramTemplate), so this can only
+		// fail if the template itself is corrupt — a bug, not user input.
+		if err := p.VAST.apply(payload); err != nil {
+			panic(fmt.Sprintf("bug: VAST.apply failed on programTemplate: %v", err))
+		}
+	}
 	binary.BigEndian.PutUint16(payload[programKeymapRefOffset:programKeymapRefOffset+2], p.KeymapID)
+	if !p.Envelope.IsEmpty() {
+		patchAmpEnv(payload, p.Envelope)
+	}
 	return buildObject(p.Hash(), p.Name, payload, 6)
+}
+
+// patchAmpEnv writes the configured envelope into the 0x21 segment's bytes.
+// config.Envelope's fields map directly onto AMPENV's real layout, so this
+// is a straight field-to-byte copy — no design-choice mapping needed. The
+// loop flag and the reserved byte (which has no corresponding config field)
+// are always written as 0.
+func patchAmpEnv(payload []byte, e Envelope) {
+	payload[ampEnvLoopOffset] = 0
+	payload[ampEnvAtt1LevelOffset] = clampEnvLevel(e.Att1Level)
+	payload[ampEnvAtt1TimeOffset] = e.Att1Time
+	payload[ampEnvAtt2LevelOffset] = clampEnvLevel(e.Att2Level)
+	payload[ampEnvAtt2TimeOffset] = e.Att2Time
+	payload[ampEnvAtt3LevelOffset] = clampEnvLevel(e.Att3Level)
+	payload[ampEnvAtt3TimeOffset] = e.Att3Time
+	payload[ampEnvDec1LevelOffset] = clampEnvLevel(e.Dec1Level)
+	payload[ampEnvDec1TimeOffset] = e.Dec1Time
+	payload[ampEnvRel1LevelOffset] = clampEnvLevel(e.Rel1Level)
+	payload[ampEnvRel1TimeOffset] = e.Rel1Time
+	payload[ampEnvRel2LevelOffset] = clampEnvLevel(e.Rel2Level)
+	payload[ampEnvRel2TimeOffset] = e.Rel2Time
+	payload[ampEnvReservedOffset] = 0
+	payload[ampEnvRel3TimeOffset] = e.Rel3Time
+}
+
+// clampEnvLevel clamps a raw 0-255 config level to the 0-100 range real
+// AMPENV level bytes use (values above 100 are treated as full level; the
+// byte is unsigned, so no negative side exists).
+func clampEnvLevel(v uint8) byte {
+	if v > 100 {
+		return 100
+	}
+	return v
 }

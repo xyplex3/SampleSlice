@@ -253,6 +253,18 @@ func generateKRZPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 		krzSlices = krzSlices[:128]
 	}
 
+	// Load VAST configuration if specified
+	var vast *krz.VAST
+	if cfg.KRZ.VASTFrom != "" && cfg.KRZ.VASTProgram != "" {
+		fmt.Printf("Loading VAST configuration from %s:%s\n", cfg.KRZ.VASTFrom, cfg.KRZ.VASTProgram)
+		loaded, err := krz.LoadVAST(cfg.KRZ.VASTFrom, cfg.KRZ.VASTProgram)
+		if err != nil {
+			return fmt.Errorf("loading VAST from %s:%s: %w", cfg.KRZ.VASTFrom, cfg.KRZ.VASTProgram, err)
+		}
+		vast = loaded
+		fmt.Printf("  Successfully loaded VAST configuration\n")
+	}
+
 	krzData, err := krz.CreateFromSlices(krzSlices,
 		krz.WithFileName(programName),
 		krz.WithVersion(krzVersion),
@@ -262,6 +274,7 @@ func generateKRZPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 		krz.WithStereo(cfg.KRZ.Stereo),
 		krz.WithEnvelope(envelope),
 		krz.WithSampleRate(wavData.SampleRate),
+		krz.WithVAST(vast),
 	)
 	if err != nil {
 		return fmt.Errorf("creating KRZ file for %q: %w", programName, err)

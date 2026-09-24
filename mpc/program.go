@@ -26,19 +26,19 @@ const (
 
 // Program represents an MPC program with pads and metadata.
 type Program struct {
-	Name    string
-	Pads    []Pad
+	Name    string // Program name (also the .prg/.xpm file's base name)
+	Pads    []Pad  // Pad assignments, one per slice
 	RootDir string // Output directory path
 }
 
 // Pad represents a single pad in the MPC program.
 type Pad struct {
-	Bank     int // 0=A, 1=B, 2=C, 3=D, 4=E, 5=F, 6=G, 7=H
-	BankPad  int // 0-15 within bank
-	Note     int // MIDI note number
-	NoteName string
-	FileName string // Relative path to the WAV file
-	Color    PadColor
+	Bank     int      // 0=A, 1=B, 2=C, 3=D, 4=E, 5=F, 6=G, 7=H
+	BankPad  int      // 0-15 within bank
+	Note     int      // MIDI note number
+	NoteName string   // Human-readable note name, e.g. "C3"
+	FileName string   // Relative path to the WAV file
+	Color    PadColor // Pad color, determined by bank
 }
 
 // PadColor represents the color of an MPC pad.

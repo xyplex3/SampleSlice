@@ -93,6 +93,8 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			Stereo:         v.GetBool("stereo"),
 			Envelope:       envelope,
 			EnvelopePreset: v.GetString("envelope-preset"),
+			VASTFrom:       v.GetString("vast-from"),
+			VASTProgram:    v.GetString("vast-program"),
 		},
 	}
 
@@ -130,8 +132,10 @@ func init() {
 	rootCmd.Flags().String("voice-mode", "drum", "KRZ voice mode: drum or poly (default: drum)")
 	rootCmd.Flags().Uint("priority", 0, "KRZ voice priority 1-8 (default: 7 for drum, 3 for poly)")
 	rootCmd.Flags().Bool("stereo", false, "Enable stereo voice mode for poly patches (default: false)")
-	rootCmd.Flags().String("envelope", "", "Raw envelope values: attack,decay1,level1,decay2,level2,decay3,level3,sustain,release (0-255 each)")
+	rootCmd.Flags().String("envelope", "", "Raw envelope values: att1level,att1time,att2level,att2time,att3level,att3time,dec1level,dec1time,rel1level,rel1time,rel2level,rel2time,rel3time (0-255 each)")
 	rootCmd.Flags().String("envelope-preset", "", "Envelope preset: drum, perc, pad, key (overridden by --envelope if both set)")
+	rootCmd.Flags().String("vast-from", "", "Path to an existing KRZ file to borrow a VAST tone from")
+	rootCmd.Flags().String("vast-program", "", "Name of the program within --vast-from to borrow (case-insensitive)")
 	rootCmd.Flags().Bool("gm-map", false, "Use General MIDI drum mapping (channel 10, standard GM drum notes)")
 	rootCmd.Flags().String("note-map", "", "Custom note assignments as comma-separated 'index=note' pairs, e.g. '0=36,1=42,2=46'")
 	rootCmd.Flags().Float64("dedupe", 0, "Similarity threshold for deduplication 0.0-1.0 (0=off, 0.95=remove near-duplicates)")
@@ -160,6 +164,8 @@ func init() {
 	mustBindFlag("stereo", "stereo")
 	mustBindFlag("envelope", "envelope")
 	mustBindFlag("envelope-preset", "envelope-preset")
+	mustBindFlag("vast-from", "vast-from")
+	mustBindFlag("vast-program", "vast-program")
 	mustBindFlag("gm-map", "gm-map")
 	mustBindFlag("note-map", "note-map")
 	mustBindFlag("dedupe", "dedupe")
