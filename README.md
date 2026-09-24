@@ -2,6 +2,8 @@
 
 ![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+![Release](https://img.shields.io/github/v/release/xyplex3/SampleSlice)
+![Build Status](https://img.shields.io/github/actions/workflow/status/xyplex3/SampleSlice/release.yml)
 
 SampleSlice turns long recording sessions into ready-to-use drum samples and
 loop libraries. Point it at a WAV file and it automatically detects every hit,
@@ -60,11 +62,20 @@ note assignment.
 
 ## Installation
 
-### Prerequisites
+### Download a prebuilt binary
 
-- Go 1.26 or higher
+Prebuilt binaries for Linux (amd64/arm64), macOS (amd64/arm64), and
+Windows (amd64) are published on the
+[Releases page](https://github.com/xyplex3/SampleSlice/releases/latest).
+Download the archive for your platform, extract it, and run the
+`sampleslice` (or `sampleslice.exe`) binary directly — no Go toolchain
+required.
 
 ### Build from source
+
+#### Prerequisites
+
+- Go 1.26 or higher
 
 ```bash
 git clone https://github.com/xyplex3/SampleSlice.git
