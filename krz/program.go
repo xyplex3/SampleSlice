@@ -1,228 +1,136 @@
 package krz
 
 import (
-	"bytes"
 	"encoding/binary"
-	"fmt"
+
+	"sampleslice/config"
 )
 
-// Program represents a Kurzweil Program object.
-// A program is a multi-part instrument definition containing up to 8 layers,
-// each referencing a keymap, along with voice mode, priority, and envelope settings.
+// VoiceMode determines how a KRZ voice behaves: either as a fixed-pitch drum (mono)
+// or as a multi-note polyphonic instrument using sample rate modulation.
+type VoiceMode int
+
+const (
+	VoiceModeDrum VoiceMode = iota // Fixed-pitch mono, one voice per drum note
+	VoiceModePoly                  // Multi-note polyphonic via sample rate modulation
+)
+
+// Envelope is the shared ASDR envelope type for KRZ layers.
+// It aliases config.Envelope so callers can pass config.Envelope values directly
+// without a conversion step.
+//
+// NOTE: Envelope, VoiceMode, priority and stereo are accepted by CreateFromSlices
+// for API compatibility, but none of them currently change the serialized
+// Program bytes. Program objects are built from a byte-for-byte template
+// captured from a real, working K2000 KRZ file (see programTemplate below);
+// which of its 254 bytes control voice mode / priority / envelope / stereo
+// has not been independently reverse-engineered yet. Until that mapping is
+// confirmed, every generated Program uses the template's own (drum, one-shot)
+// defaults regardless of these settings.
+type Envelope = config.Envelope
+
+// DefaultDrumEnvelope returns a fast, tight envelope configuration optimized for percussive sounds
+// with quick attack, moderate decay, and short release.
+func DefaultDrumEnvelope() Envelope {
+	return Envelope{
+		Attack:  0,
+		Decay1:  20,
+		Level1:  70,
+		Decay2:  30,
+		Level2:  0,
+		Decay3:  0,
+		Level3:  0,
+		Sustain: 0,
+		Release: 5,
+	}
+}
+
+// DefaultPolyEnvelope returns a smooth, expressive envelope configuration suitable for polyphonic
+// hits and pad sounds with gradual attack, multi-stage decay, and longer release.
+func DefaultPolyEnvelope() Envelope {
+	return Envelope{
+		Attack:  5,
+		Decay1:  40,
+		Level1:  70,
+		Decay2:  60,
+		Level2:  30,
+		Decay3:  80,
+		Level3:  0,
+		Sustain: 0,
+		Release: 40,
+	}
+}
+
+// programTemplate is the 254-byte object-specific payload of a real, working
+// K2000 Program object, captured verbatim from a hardware-authored KRZ file
+// (KRZDRMS.KRZ, a one-shot drum voice). Only one field within it is known to
+// vary per instance — the referenced Keymap ID at payload offset
+// programKeymapRefOffset — confirmed by diffing three real Program objects
+// (a "master" drum program and two per-hit voices) that were otherwise
+// byte-for-byte identical. Everything else (VAST algorithm routing, filter,
+// pan, and amplitude parameters) is reused as-is: its semantics have not
+// been independently decoded, but it is known to produce a working,
+// audible, correctly one-shot voice on real hardware.
+var programTemplate = []byte{
+	0x00, 0x50, 0x08, 0x02, 0x01, 0x00, 0x37, 0x40, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x01, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x0c, 0x6c, 0x00, 0x7f, 0x00, 0x04,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x7f, 0x01, 0x35, 0x35,
+	0x00, 0x35, 0x11, 0x00, 0x7f, 0x02, 0x35, 0x35, 0x00, 0x35, 0x18, 0x01,
+	0x00, 0x00, 0x19, 0x02, 0x00, 0x00, 0x14, 0x00, 0x00, 0x2e, 0x00, 0x00,
+	0x01, 0x00, 0x15, 0x00, 0x00, 0x2e, 0x00, 0x00, 0x01, 0x00, 0x1a, 0x03,
+	0x00, 0x00, 0x1b, 0x04, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00,
+	0x49, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x48, 0x00, 0x21, 0x00,
+	0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x22, 0x00, 0x64, 0x67, 0x9c, 0x67, 0x64, 0x67, 0x64, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x23, 0x00, 0x64, 0x00, 0x00, 0x67,
+	0x9c, 0x67, 0x00, 0x67, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x7f,
+	0x00, 0x00, 0x2b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc9,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x50, 0x3e, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x51, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x52, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x53, 0x01, 0x06, 0x00, 0x00, 0x14,
+	0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x00, 0x00,
+	0x00, 0x00,
+}
+
+// programKeymapRefOffset is the byte offset, within programTemplate, of the
+// 2-byte big-endian Keymap ID this program references.
+const programKeymapRefOffset = 166
+
+// Program represents a Kurzweil Program object (T_PROGRAM): the object a
+// user actually selects to play a voice or drum kit. It references a
+// Keymap by ID; the Keymap in turn determines whether that Program plays a
+// single sample (a per-hit voice) or dispatches to other Programs per key
+// (a drum kit's "master" Program+Keymap pair).
 type Program struct {
-	// Name is the display name of the program, up to 16 bytes.
-	Name string
-	// ID is the unique identifier for this program within a KRZ file.
+	// ID is the object's numeric ID (>= 200 for user objects).
 	ID uint16
-	// Hash is the 16-bit hash derived from ID and object type, used for binary serialization.
-	Hash uint16
-	// Parts is the list of program layers (up to 8), each defining sample playback parameters.
-	Parts []Part
-	// Keymap is the primary keymap associated with this program (used for convenience).
-	Keymap *Keymap
-	// VoiceMode determines whether the program plays as drum (mono/fixed) or poly (multi-note).
-	VoiceMode VoiceMode
-	// Priority is the voice-stealing priority (1-8, where 8 is highest).
-	Priority uint8
-	// Stereo indicates whether polyphonic stereo mode is enabled.
-	Stereo bool
-	// Envelope defines the 10-parameter ADSR amplitude envelope applied to all parts.
-	Envelope Envelope
+	// Name is the display name, up to 16 bytes.
+	Name string
+	// KeymapID is the ID of the Keymap object this program references.
+	KeymapID uint16
 }
 
-// Part represents a single layer in a Kurzweil program (up to 8 layers per program).
-// Each part references a keymap and defines playback parameters such as key range,
-// velocity range, panning, transposition, looping, and effects.
-type Part struct {
-	// Enabled indicates whether this part is active in the program.
-	Enabled bool
-	// PartID is the internal part identifier (1-8).
-	PartID uint16
-	// KeymapRef is the hash of the keymap this part uses for sample playback.
-	KeymapRef uint16
-	// RootNote is the base MIDI note (0-127) at which the sample plays at original pitch.
-	RootNote uint16
-	// Transpose shifts the playback pitch in semitones (-64 to +63).
-	Transpose int16
-	// Velocity is the base playback velocity (0-127).
-	Velocity uint16
-	// Pan is the stereo position (0=full left, 64=center, 127=full right).
-	Pan uint16
-	// Output is the audio output bus number (1-16).
-	Output uint16
-	// LoKey is the lowest MIDI note (0-127) that triggers this part.
-	LoKey uint16
-	// HiKey is the highest MIDI note (0-127) that triggers this part.
-	HiKey uint16
-	// LoVel is the lowest velocity (0-127) that triggers this part.
-	LoVel uint16
-	// HiVel is the highest velocity (0-127) that triggers this part.
-	HiVel uint16
-	// Reverse enables backward sample playback.
-	Reverse bool
-	// Loop enables looping between LoopStart and LoopEnd.
-	Loop bool
-	// LoopStart is the sample position where looping begins, in samples.
-	LoopStart uint32
-	// LoopEnd is the sample position where looping ends, in samples.
-	LoopEnd uint32
-	// Offset is the sample position where playback begins, in samples.
-	Offset uint32
-	// End is the sample position where playback stops, in samples.
-	End uint32
-	// FineTune adjusts pitch in cents (-100 to +100).
-	FineTune int16
-	// Portamento enables glide between note pitch changes.
-	Portamento bool
-	// PortamentoTime is the glide duration in milliseconds.
-	PortamentoTime uint16
+// NewProgram creates a Program with the given ID, name, and Keymap
+// reference. voiceMode, priority, stereo, and envelope are accepted for API
+// compatibility but do not currently affect the serialized bytes — see the
+// Envelope doc comment.
+func NewProgram(id uint16, name string, keymapID uint16, _ VoiceMode, _ uint8, _ bool, _ Envelope) *Program {
+	return &Program{ID: id, Name: name, KeymapID: keymapID}
 }
 
-// NewProgram creates a new Program with the given ID, name, voice mode, priority, stereo flag, and envelope.
-// The name is truncated to 16 bytes if it exceeds that length.
-func NewProgram(id uint16, name string, voiceMode VoiceMode, priority uint8, stereo bool, envelope Envelope) *Program {
-	if len(name) > 16 {
-		name = name[:16]
-	}
-	return &Program{
-		Name:      name,
-		ID:        id,
-		Hash:      GenerateHash(id, T_PROGRAM),
-		VoiceMode: voiceMode,
-		Priority:  priority,
-		Stereo:    stereo,
-		Envelope:  envelope,
-	}
+// Hash returns this program's object hash.
+func (p *Program) Hash() uint16 {
+	return GenerateHash(p.ID, T_PROGRAM)
 }
 
-// AddPart appends a part to the program's layer list.
-// MIDI note values (RootNote, LoKey, HiKey) are clamped to the valid range 0-127.
-func (p *Program) AddPart(part Part) {
-	// Validate MIDI note range
-	part.RootNote = validateMidiNoteUint(part.RootNote)
-	part.LoKey = validateMidiNoteUint(part.LoKey)
-	part.HiKey = validateMidiNoteUint(part.HiKey)
-	p.Parts = append(p.Parts, part)
-}
-
-// SetKeymap sets the keymap hash reference for the part at the given index.
-// If partIndex is out of range, the call has no effect.
-func (p *Program) SetKeymap(partIndex int, keymap *Keymap) {
-	if partIndex >= 0 && partIndex < len(p.Parts) {
-		p.Parts[partIndex].KeymapRef = keymap.Hash
-	}
-}
-
-// layerStride is the fixed byte size of one program layer slot in the
-// serialized output: the size an active part's fields add up to. Empty
-// slots are padded to the same size so all 8 slots share one stride.
-const layerStride = 43
-
-// Serialize converts the program to its binary KRZ representation.
-// The output includes a 6-byte header, 8 layer blocks (43 bytes each),
-// voice mode, priority, and the 10-parameter envelope.
-func (p *Program) Serialize() ([]byte, error) {
-	var buf bytes.Buffer
-	ew := &errWriter{w: &buf}
-
-	ew.write(p.Hash)
-	sizeOffset := buf.Len()
-	ew.writeBytes([]byte{0x00, 0x00}) // total size placeholder
-	ew.write(uint16(8))               // name offset
-
-	nameBytes := []byte(p.Name)
-	if len(nameBytes) < 16 {
-		nameBytes = append(nameBytes, make([]byte, 16-len(nameBytes))...)
-	}
-	ew.writeBytes(nameBytes[:16])
-
-	// LYR segment: 8 layers, each 40 bytes
-	for i := 0; i < 8; i++ {
-		if i < len(p.Parts) {
-			part := p.Parts[i]
-
-			enabledByte := byte(0)
-			if part.Enabled {
-				enabledByte = 1
-			}
-			ew.write(enabledByte)
-			ew.write(part.PartID)
-			ew.write(part.KeymapRef)
-			ew.write(part.RootNote)
-			ew.write(part.Transpose)
-			ew.write(part.Velocity)
-			ew.write(byte(part.Pan))
-			ew.write(byte(part.Output))
-			ew.write(part.LoKey)
-			ew.write(part.HiKey)
-			ew.write(part.LoVel)
-			ew.write(part.HiVel)
-
-			flags := byte(0)
-			if part.Reverse {
-				flags |= 0x01
-			}
-			if part.Loop {
-				flags |= 0x02
-			}
-			ew.write(flags)
-			ew.write(part.Offset)
-			ew.write(part.End)
-			ew.write(part.LoopStart)
-			ew.write(part.LoopEnd)
-			ew.write(part.FineTune)
-
-			portamentoFlags := byte(0)
-			if part.Portamento {
-				portamentoFlags = 1
-			}
-			ew.write(portamentoFlags)
-			ew.write(part.PortamentoTime)
-		} else {
-			ew.writeBytes(make([]byte, layerStride))
-		}
-	}
-
-	// Voice mode byte: bit 0 = stereo, bit 1 = poly
-	voiceModeByte := byte(0)
-	if p.VoiceMode == VoiceModePoly {
-		voiceModeByte |= 0x02
-	}
-	if p.Stereo {
-		voiceModeByte |= 0x01
-	}
-	ew.write(voiceModeByte)
-
-	// Priority 1-8 stored as 0-7
-	priorityByte := byte(0)
-	if p.Priority >= 1 && p.Priority <= 8 {
-		priorityByte = p.Priority - 1
-	}
-	ew.write(priorityByte)
-
-	// Envelope: 9 bytes + 1 reserved
-	e := p.Envelope
-	ew.writeBytes([]byte{e.Attack, e.Decay1, e.Level1, e.Decay2, e.Level2, e.Decay3, e.Level3, e.Sustain, e.Release, 0})
-
-	if ew.err != nil {
-		return nil, fmt.Errorf("serializing program %q: %w", p.Name, ew.err)
-	}
-
-	// Fill in the total-size field now that we know the final length.
-	data := buf.Bytes()
-	binary.BigEndian.PutUint16(data[sizeOffset:sizeOffset+2], uint16(len(data)))
-
-	return data, nil
-}
-
-// CalculateSize returns the serialized byte length of the program,
-// rounded up to the nearest 2-byte boundary.
-func (p *Program) CalculateSize() (int, error) {
-	data, err := p.Serialize()
-	if err != nil {
-		return 0, fmt.Errorf("failed to serialize program: %w", err)
-	}
-	// Pad to 2-byte boundary
-	paddedSize := (len(data) + 1) & ^1
-	return paddedSize, nil
+// Serialize encodes the program into its binary KRZ object form.
+func (p *Program) Serialize() []byte {
+	payload := make([]byte, len(programTemplate))
+	copy(payload, programTemplate)
+	binary.BigEndian.PutUint16(payload[programKeymapRefOffset:programKeymapRefOffset+2], p.KeymapID)
+	return buildObject(p.Hash(), p.Name, payload, 6)
 }

@@ -1,164 +1,112 @@
 package krz
 
-import (
-	"bytes"
-	"fmt"
-)
+import "encoding/binary"
 
-// Keymap represents a Kurzweil Keymap object containing sample data.
-// A keymap groups one or more samples that share a common name and identifier,
-// and can be referenced by program parts.
+// numKeys is the K2000's keyboard range (MIDI notes 0-127).
+const numKeys = 128
+
+// keymapReserved is a fixed 2-byte field observed at the start of every
+// real Keymap object's payload, regardless of content. Its meaning hasn't
+// been independently decoded; it's reused verbatim.
+const keymapReserved = 0x004b
+
+// Keymap represents a Kurzweil Keymap object (T_KEYMAP). Two variants were
+// confirmed by decoding real K2000 KRZ files:
+//
+//   - A single-sample keymap (method 1): every key plays the same
+//     referenced Sample, used for one drum hit's per-hit voice.
+//   - A "master" multi-entry keymap (method 3): each of the 128 keys holds
+//     its own 2-byte Program-ID reference (plus a 1-byte flag), used to
+//     dispatch a drum kit's top-level Program to the right per-hit voice.
 type Keymap struct {
-	// Name is the display name of the keymap, up to 16 bytes.
+	ID   uint16
 	Name string
-	// ID is the unique identifier for this keymap within a KRZ file.
-	ID uint16
-	// Hash is the 16-bit hash derived from ID and object type, used for binary serialization.
-	Hash uint16
-	// Samples is the list of sample blocks contained in this keymap.
-	Samples []SampleBlock
+
+	multi    bool
+	sampleID uint16   // single-sample mode: the referenced Sample's ID
+	entries  []uint16 // multi mode: per-key referenced Program ID, len 128
 }
 
-// SampleBlock represents a single sample in a keymap.
-// It holds the raw audio data, playback range (MIDI notes), format, and compression settings.
-type SampleBlock struct {
-	// SampleType indicates the channel layout: 0=mono, 1=stereo left, 2=stereo right.
-	SampleType uint8
-	// Flags contains bit flags for loop mode and other sample behavior.
-	Flags uint8
-	// StartNote is the lowest MIDI note (0-127) that triggers this sample.
-	StartNote uint16
-	// EndNote is the highest MIDI note (0-127) that triggers this sample.
-	EndNote uint16
-	// RootNote is the MIDI note at which the sample plays at its original pitch.
-	RootNote uint16
-	// Format is the sample encoding: 0=8-bit unsigned, 2=16-bit signed, 3=ADPCM.
-	Format uint16
-	// RawData is the uncompressed sample data in the format specified by Format.
-	RawData []byte
-	// Compressed indicates whether ADPCM compression should be applied during serialization.
-	Compressed bool
+// NewSingleSampleKeymap creates a Keymap that plays sampleID at every key —
+// the per-hit keymap shape a real K2000 drum voice uses.
+func NewSingleSampleKeymap(id uint16, name string, sampleID uint16) *Keymap {
+	return &Keymap{ID: id, Name: name, sampleID: sampleID}
 }
 
-// NewKeymap creates a new [Keymap] with the given ID and name.
-// The name is truncated to 16 bytes if it exceeds that length.
-func NewKeymap(id uint16, name string) *Keymap {
-	if len(name) > 16 {
-		name = name[:16]
+// NewMasterKeymap creates a multi-entry Keymap with every key defaulted to
+// defaultProgramID. Call SetEntry to assign specific keys to specific
+// per-hit Programs.
+func NewMasterKeymap(id uint16, name string, defaultProgramID uint16) *Keymap {
+	entries := make([]uint16, numKeys)
+	for i := range entries {
+		entries[i] = defaultProgramID
 	}
-	return &Keymap{
-		Name: name,
-		ID:   id,
-		Hash: GenerateHash(id, T_KEYMAP),
-	}
+	return &Keymap{ID: id, Name: name, multi: true, entries: entries}
 }
 
-// AddSample adds a sample block to the keymap.
-// MIDI note values (rootNote, loKey, hiKey) are clamped to 0-127.
-func (k *Keymap) AddSample(sampleData []int16, rootNote uint16, loKey uint16, hiKey uint16, sampleFormat int, compress bool) {
-	// Validate MIDI note range
-	rootNote = validateMidiNoteUint(rootNote)
-	loKey = validateMidiNoteUint(loKey)
-	hiKey = validateMidiNoteUint(hiKey)
-
-	// Convert sample data to KRZ format. sampleFormat is the SampleBlock.Format
-	// code (0=8-bit unsigned, 2=16-bit signed, 3=ADPCM), not a bit depth, so it
-	// must be mapped to the bit depth ConvertWAVToKRZFormat expects.
-	bitsPerSample := 8
-	if sampleFormat == 2 {
-		bitsPerSample = 16
+// SetEntry assigns MIDI key (0-127) to reference programID. No-op on a
+// single-sample keymap or an out-of-range key.
+func (k *Keymap) SetEntry(key int, programID uint16) {
+	if !k.multi || key < 0 || key >= len(k.entries) {
+		return
 	}
+	k.entries[key] = programID
+}
 
-	var rawData []byte
-	if compress {
-		// For ADPCM, first convert to 8-bit unsigned
-		rawData = ConvertWAVToKRZFormat(sampleData, 8)
+// Hash returns this keymap's object hash.
+func (k *Keymap) Hash() uint16 {
+	return GenerateHash(k.ID, T_KEYMAP)
+}
+
+// Serialize encodes the keymap into its binary KRZ object form.
+//
+// Payload layout (all fields confirmed against real files):
+//
+//	0:2   reserved       = keymapReserved
+//	2:4   sampleId       = referenced Sample ID (single-sample) or 0 (multi)
+//	4:6   method         = 1 (single-sample) or 3 (multi)
+//	6:8   basePitch      = 0
+//	8:10  centsPerEntry  = 100
+//	10:12 entriesPerVel  = 127
+//	12:14 entrySize      = 1 (single-sample) or 3 (multi)
+//	14:30 Level[8]       = (8-j)*2 for j in 0..7
+//	30:   key entries    = numKeys * entrySize bytes:
+//	      single-sample: numKeys bytes, each 0x01
+//	      multi: numKeys * (uint16 BE programID + 1 byte flag=1)
+func (k *Keymap) Serialize() []byte {
+	entrySize := 1
+	if k.multi {
+		entrySize = 3
+	}
+	payload := make([]byte, 30+numKeys*entrySize)
+
+	binary.BigEndian.PutUint16(payload[0:2], keymapReserved)
+	if k.multi {
+		binary.BigEndian.PutUint16(payload[2:4], 0)
+		binary.BigEndian.PutUint16(payload[4:6], 3)
 	} else {
-		rawData = ConvertWAVToKRZFormat(sampleData, bitsPerSample)
+		binary.BigEndian.PutUint16(payload[2:4], k.sampleID)
+		binary.BigEndian.PutUint16(payload[4:6], 1)
+	}
+	binary.BigEndian.PutUint16(payload[6:8], 0)     // basePitch
+	binary.BigEndian.PutUint16(payload[8:10], 100)  // centsPerEntry
+	binary.BigEndian.PutUint16(payload[10:12], 127) // entriesPerVel
+	binary.BigEndian.PutUint16(payload[12:14], uint16(entrySize))
+	for j := 0; j < 8; j++ {
+		binary.BigEndian.PutUint16(payload[14+j*2:16+j*2], uint16((8-j)*2))
 	}
 
-	block := SampleBlock{
-		SampleType: 0, // mono
-		Flags:      0,
-		StartNote:  loKey,
-		EndNote:    hiKey,
-		RootNote:   rootNote,
-		Format:     uint16(sampleFormat),
-		RawData:    rawData,
-		Compressed: compress,
-	}
-
-	if compress {
-		block.Format = 3 // ADPCM format
-	}
-
-	k.Samples = append(k.Samples, block)
-}
-
-// Serialize encodes the keymap into the binary KRZ keymap format.
-// Binary layout:
-//   Offset 0-1: Hash (big-endian uint16)
-//   Offset 2-3: Sample count (big-endian uint16)
-//   Offset 4-9: Reserved (6 zero bytes)
-//   Offset 10: Name length (uint8)
-//   Offset 11-26: Name data (16 bytes, null-padded)
-//   Then: sample blocks
-// If a sample block is marked as Compressed, ADPCM compression is applied
-// before writing. Returns the serialized bytes or an error if serialization fails.
-func (k *Keymap) Serialize() ([]byte, error) {
-	var buf bytes.Buffer
-	ew := &errWriter{w: &buf}
-
-	ew.write(k.Hash)
-	ew.write(uint16(len(k.Samples)))
-	ew.writeBytes([]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) // reserved
-	nameBytes := []byte(k.Name)
-	nameLen := len(nameBytes)
-	if nameLen > 16 {
-		nameLen = 16
-	}
-	padded := make([]byte, 16)
-	copy(padded, nameBytes)
-	ew.write(byte(nameLen))
-	ew.writeBytes(padded)
-
-	for _, block := range k.Samples {
-		sampleData := block.RawData
-		compressedDataSize := uint32(len(sampleData))
-
-		if block.Compressed {
-			compressed := CompressADPCM(sampleData)
-			sampleData = compressed
-			compressedDataSize = uint32(len(sampleData))
+	if k.multi {
+		for i, id := range k.entries {
+			off := 30 + i*3
+			binary.BigEndian.PutUint16(payload[off:off+2], id)
+			payload[off+2] = 1
 		}
-
-		rawSampleSize := uint32(len(block.RawData))
-
-		ew.write(block.SampleType)
-		ew.write(block.Flags)
-		ew.write(block.StartNote)
-		ew.write(block.EndNote)
-		ew.write(block.RootNote)
-		ew.write(block.Format)
-		ew.write(compressedDataSize)
-		ew.write(rawSampleSize)
-		ew.writeBytes(sampleData)
+	} else {
+		for i := 30; i < len(payload); i++ {
+			payload[i] = 1
+		}
 	}
 
-	if ew.err != nil {
-		return nil, fmt.Errorf("serializing keymap %q: %w", k.Name, ew.err)
-	}
-	return buf.Bytes(), nil
-}
-
-// CalculateSize returns the serialized byte size of the keymap,
-// rounded up to the nearest 2-byte boundary.
-func (k *Keymap) CalculateSize() (int, error) {
-	data, err := k.Serialize()
-	if err != nil {
-		return 0, fmt.Errorf("failed to serialize keymap: %w", err)
-	}
-	// Pad to 2-byte boundary
-	paddedSize := (len(data) + 1) & ^1
-	return paddedSize, nil
+	return buildObject(k.Hash(), k.Name, payload, 4)
 }

@@ -1,4 +1,3 @@
-// Package krz tests for Program construction, part management, and serialization.
 package krz
 
 import (
@@ -6,464 +5,93 @@ import (
 	"testing"
 )
 
-// -----------------------------------------------------------------------
-// Tests for NewProgram
-// -----------------------------------------------------------------------
+func TestProgram_Serialize_CommonHeader(t *testing.T) {
+	p := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, DefaultDrumEnvelope())
+	obj := p.Serialize()
 
-func TestNewProgram(t *testing.T) {
+	wantHash := GenerateHash(201, T_PROGRAM)
+	if got := binary.BigEndian.Uint16(obj[4:6]); got != wantHash {
+		t.Errorf("hash = 0x%04x, want 0x%04x", got, wantHash)
+	}
+	blocksize := int32(binary.BigEndian.Uint32(obj[0:4]))
+	if int(-blocksize) != len(obj) {
+		t.Errorf("blocksize = %d, want -%d", blocksize, len(obj))
+	}
+	name := obj[10:26]
+	if string(name) != "kick001         " {
+		t.Errorf("name = %q, want %q", name, "kick001         ")
+	}
+}
+
+// TestProgram_Serialize_KeymapReference verifies the one field confirmed to
+// vary between real Program objects: the referenced Keymap ID at payload
+// offset programKeymapRefOffset.
+func TestProgram_Serialize_KeymapReference(t *testing.T) {
 	tests := []struct {
-		name      string
-		id        uint16
-		nameStr   string
-		voiceMode VoiceMode
-		priority  uint8
-		stereo    bool
-		wantName  string
-		wantHash  uint16
+		progID, keymapID uint16
 	}{
-		{
-			name: "drum no stereo", id: 1, nameStr: "Drums",
-			voiceMode: VoiceModeDrum, priority: 1, stereo: false,
-			wantName: "Drums", wantHash: 0x8401,
-		},
-		{
-			name: "poly stereo", id: 2, nameStr: "Pads",
-			voiceMode: VoiceModePoly, priority: 4, stereo: true,
-			wantName: "Pads", wantHash: 0x8402,
-		},
-		{
-			name: "long name truncated", id: 3, nameStr: "ThisIsAVeryLongNameHere",
-			voiceMode: VoiceModeDrum, priority: 1, stereo: false,
-			wantName: "ThisIsAVeryLongN", wantHash: 0x8403,
-		},
-		{
-			name: "empty name", id: 4, nameStr: "",
-			voiceMode: VoiceModeDrum, priority: 1, stereo: false,
-			wantName: "", wantHash: 0x8404,
-		},
-		{
-			name: "max priority", id: 5, nameStr: "MaxPri",
-			voiceMode: VoiceModeDrum, priority: 8, stereo: false,
-			wantName: "MaxPri", wantHash: 0x8405,
-		},
+		{200, 200}, // master program -> master keymap
+		{201, 201}, // per-hit program -> its own per-hit keymap
+		{202, 500}, // arbitrary program/keymap ID pairing
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := DefaultDrumEnvelope()
-			p := NewProgram(tt.id, tt.nameStr, tt.voiceMode, tt.priority, tt.stereo, env)
-
-			if p.Name != tt.wantName {
-				t.Errorf("Name = %q, want %q", p.Name, tt.wantName)
-			}
-			if p.Hash != tt.wantHash {
-				t.Errorf("Hash = 0x%04x, want 0x%04x", p.Hash, tt.wantHash)
-			}
-			if p.VoiceMode != tt.voiceMode {
-				t.Errorf("VoiceMode = %v, want %v", p.VoiceMode, tt.voiceMode)
-			}
-			if p.Priority != tt.priority {
-				t.Errorf("Priority = %d, want %d", p.Priority, tt.priority)
-			}
-			if p.Stereo != tt.stereo {
-				t.Errorf("Stereo = %v, want %v", p.Stereo, tt.stereo)
-			}
-			if len(p.Parts) != 0 {
-				t.Errorf("Parts length = %d, want 0 (empty initially)", len(p.Parts))
-			}
-			if p.Envelope != env {
-				t.Errorf("Envelope not stored correctly")
-			}
-		})
+		p := NewProgram(tt.progID, "Test", tt.keymapID, VoiceModeDrum, 1, false, DefaultDrumEnvelope())
+		obj := p.Serialize()
+		payload := obj[26:]
+		got := binary.BigEndian.Uint16(payload[programKeymapRefOffset : programKeymapRefOffset+2])
+		if got != tt.keymapID {
+			t.Errorf("progID %d: keymap ref = %d, want %d", tt.progID, got, tt.keymapID)
+		}
 	}
 }
 
-// -----------------------------------------------------------------------
-// Tests for Program.AddPart
-// -----------------------------------------------------------------------
+// TestProgram_Serialize_TemplateUnchangedElsewhere verifies that only the
+// hash, name, and keymap-reference field differ between two Program objects
+// with different IDs/names/keymap refs — matching the real-file evidence
+// that the rest of the 280-byte object is a reusable constant template.
+func TestProgram_Serialize_TemplateUnchangedElsewhere(t *testing.T) {
+	p1 := NewProgram(201, "kick001", 201, VoiceModeDrum, 1, false, DefaultDrumEnvelope())
+	p2 := NewProgram(202, "kick002", 202, VoiceModePoly, 5, true, DefaultPolyEnvelope())
 
-func TestProgram_AddPart(t *testing.T) {
-	t.Run("adds single part", func(t *testing.T) {
-		p := NewProgram(1, "Test", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		p.AddPart(Part{
-			Enabled:   true,
-			PartID:    1,
-			KeymapRef: 0x8201,
-			RootNote:  60,
-			Velocity:  100,
-			LoKey:     0,
-			HiKey:     127,
-		})
-		if len(p.Parts) != 1 {
-			t.Fatalf("Parts length = %d, want 1", len(p.Parts))
-		}
-		if !p.Parts[0].Enabled {
-			t.Error("Enabled = false, want true")
-		}
-	})
+	obj1 := p1.Serialize()
+	obj2 := p2.Serialize()
+	if len(obj1) != len(obj2) {
+		t.Fatalf("lengths differ: %d vs %d", len(obj1), len(obj2))
+	}
 
-	t.Run("accumulates multiple parts", func(t *testing.T) {
-		p := NewProgram(1, "Multi", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		for i := 0; i < 4; i++ {
-			p.AddPart(Part{Enabled: true, PartID: uint16(i + 1)})
-		}
-		if len(p.Parts) != 4 {
-			t.Errorf("Parts length = %d, want 4", len(p.Parts))
-		}
-	})
+	allowedDiff := map[int]bool{
+		5:  true, // hash low byte
+		16: true, // name digit
+	}
+	for i := 26 + programKeymapRefOffset; i < 26+programKeymapRefOffset+2; i++ {
+		allowedDiff[i] = true
+	}
 
-	t.Run("RootNote clamped to 127", func(t *testing.T) {
-		p := NewProgram(1, "Clamp", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		p.AddPart(Part{RootNote: 200, LoKey: 0, HiKey: 200})
-		if p.Parts[0].RootNote != 127 {
-			t.Errorf("RootNote = %d, want 127 (clamped)", p.Parts[0].RootNote)
+	for i := range obj1 {
+		if obj1[i] != obj2[i] && !allowedDiff[i] {
+			t.Errorf("unexpected diff at byte %d: %02x vs %02x (only hash/name/keymap-ref should vary)", i, obj1[i], obj2[i])
 		}
-		if p.Parts[0].HiKey != 127 {
-			t.Errorf("HiKey = %d, want 127 (clamped)", p.Parts[0].HiKey)
-		}
-	})
-
-	t.Run("LoKey preserved when valid", func(t *testing.T) {
-		p := NewProgram(1, "LoKey", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		p.AddPart(Part{LoKey: 36, HiKey: 60})
-		if p.Parts[0].LoKey != 36 {
-			t.Errorf("LoKey = %d, want 36", p.Parts[0].LoKey)
-		}
-	})
+	}
 }
 
-// -----------------------------------------------------------------------
-// Tests for Program.SetKeymap
-// -----------------------------------------------------------------------
-
-func TestProgram_SetKeymap(t *testing.T) {
-	t.Run("sets keymap ref on valid index", func(t *testing.T) {
-		p := NewProgram(1, "Test", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		p.AddPart(Part{Enabled: true, PartID: 1, KeymapRef: 0x0000})
-		km := NewKeymap(5, "MyKeymap")
-
-		p.SetKeymap(0, km)
-
-		if p.Parts[0].KeymapRef != km.Hash {
-			t.Errorf("KeymapRef = 0x%04x, want 0x%04x", p.Parts[0].KeymapRef, km.Hash)
-		}
-	})
-
-	t.Run("out-of-range index is no-op", func(t *testing.T) {
-		p := NewProgram(1, "Test", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		p.AddPart(Part{Enabled: true, PartID: 1})
-		km := NewKeymap(1, "KM")
-		originalRef := p.Parts[0].KeymapRef
-
-		p.SetKeymap(5, km) // only 1 part, so index 5 is out of range
-
-		if p.Parts[0].KeymapRef != originalRef {
-			t.Error("KeymapRef changed for out-of-range SetKeymap call")
-		}
-		if len(p.Parts) != 1 {
-			t.Errorf("Parts length changed to %d, want 1", len(p.Parts))
-		}
-	})
-
-	t.Run("negative index is no-op", func(t *testing.T) {
-		p := NewProgram(1, "Test", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		p.AddPart(Part{Enabled: true})
-		km := NewKeymap(1, "KM")
-		originalRef := p.Parts[0].KeymapRef
-
-		p.SetKeymap(-1, km)
-
-		if p.Parts[0].KeymapRef != originalRef {
-			t.Error("KeymapRef changed for negative-index SetKeymap call")
-		}
-	})
+func TestProgram_Hash(t *testing.T) {
+	p := NewProgram(200, "DRM02", 200, VoiceModeDrum, 1, false, DefaultDrumEnvelope())
+	want := GenerateHash(200, T_PROGRAM)
+	if p.Hash() != want {
+		t.Errorf("Hash() = 0x%04x, want 0x%04x", p.Hash(), want)
+	}
 }
 
-// -----------------------------------------------------------------------
-// Tests for Program.Serialize
-// -----------------------------------------------------------------------
-
-// programVoiceModeOffset is the fixed byte offset of the voice-mode byte
-// in a program serialized with zero active parts (all 8 layers empty).
-// Layout: hash(2) + size(2) + nameOffset(2) + name(16) + 8*emptyLayer(43) = 366.
-const programVoiceModeOffset = 366
-
-func TestProgram_Serialize(t *testing.T) {
-	t.Run("returns non-empty bytes", func(t *testing.T) {
-		p := NewProgram(1, "Test", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		data, err := p.Serialize()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(data) == 0 {
-			t.Fatal("serialized data is empty")
-		}
-	})
-
-	t.Run("first two bytes are the hash", func(t *testing.T) {
-		p := NewProgram(3, "Check", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		data, err := p.Serialize()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		gotHash := binary.BigEndian.Uint16(data[0:2])
-		if gotHash != p.Hash {
-			t.Errorf("hash = 0x%04x, want 0x%04x", gotHash, p.Hash)
-		}
-	})
-
-	t.Run("size field matches actual data length", func(t *testing.T) {
-		p := NewProgram(1, "SizeCheck", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		data, err := p.Serialize()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		sizeField := binary.BigEndian.Uint16(data[2:4])
-		if int(sizeField) != len(data) {
-			t.Errorf("size field = %d, actual len = %d", sizeField, len(data))
-		}
-	})
-
-	t.Run("name offset field is 8", func(t *testing.T) {
-		p := NewProgram(1, "Name", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		data, _ := p.Serialize()
-		nameOffset := binary.BigEndian.Uint16(data[4:6])
-		if nameOffset != 8 {
-			t.Errorf("name offset = %d, want 8", nameOffset)
-		}
-	})
-
-	t.Run("drum mode no stereo produces voice byte 0x00", func(t *testing.T) {
-		p := NewProgram(1, "Drum", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		data, _ := p.Serialize()
-		if data[programVoiceModeOffset] != 0x00 {
-			t.Errorf("voice mode byte = 0x%02x, want 0x00", data[programVoiceModeOffset])
-		}
-	})
-
-	t.Run("poly mode produces voice byte with 0x02 set", func(t *testing.T) {
-		p := NewProgram(1, "Poly", VoiceModePoly, 1, false, DefaultPolyEnvelope())
-		data, _ := p.Serialize()
-		if data[programVoiceModeOffset]&0x02 == 0 {
-			t.Errorf("voice mode byte = 0x%02x, want poly bit (0x02) set",
-				data[programVoiceModeOffset])
-		}
-	})
-
-	t.Run("stereo flag sets bit 0 of voice byte", func(t *testing.T) {
-		p := NewProgram(1, "Stereo", VoiceModeDrum, 1, true, DefaultDrumEnvelope())
-		data, _ := p.Serialize()
-		if data[programVoiceModeOffset]&0x01 == 0 {
-			t.Errorf("voice mode byte = 0x%02x, expected stereo bit (0x01) set",
-				data[programVoiceModeOffset])
-		}
-	})
-
-	t.Run("priority stored as value minus 1", func(t *testing.T) {
-		p := NewProgram(1, "Pri5", VoiceModeDrum, 5, false, DefaultDrumEnvelope())
-		data, _ := p.Serialize()
-		// Priority byte immediately follows voice mode byte.
-		priorityByte := data[programVoiceModeOffset+1]
-		if priorityByte != 4 { // priority 5 - 1 = 4
-			t.Errorf("priority byte = %d, want 4 (priority 5 - 1)", priorityByte)
-		}
-	})
-
-	t.Run("priority 1 stored as 0", func(t *testing.T) {
-		p := NewProgram(1, "Pri1", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		data, _ := p.Serialize()
-		priorityByte := data[programVoiceModeOffset+1]
-		if priorityByte != 0 {
-			t.Errorf("priority byte = %d, want 0 (priority 1 - 1)", priorityByte)
-		}
-	})
+func TestDefaultDrumEnvelope(t *testing.T) {
+	e := DefaultDrumEnvelope()
+	if e.Attack != 0 || e.Decay1 != 20 || e.Release != 5 {
+		t.Errorf("unexpected drum envelope defaults: %+v", e)
+	}
 }
 
-// TestProgram_Serialize_ActivePart verifies that a program with an active
-// part serializes with a consistent layer stride: all 8 layer slots are
-// exactly layerStride bytes, so the voice-mode byte, priority byte, and
-// envelope land at the same offsets regardless of how many parts are active.
-func TestProgram_Serialize_ActivePart(t *testing.T) {
-	p := NewProgram(1, "Active", VoiceModePoly, 4, true, DefaultPolyEnvelope())
-	p.AddPart(Part{
-		Enabled:   true,
-		PartID:    1,
-		KeymapRef: 0x8201,
-		RootNote:  60,
-		Transpose: -12,
-		Velocity:  100,
-		Pan:       64,
-		Output:    1,
-		LoKey:     0,
-		HiKey:     127,
-		LoVel:     0,
-		HiVel:     127,
-	})
-
-	data, err := p.Serialize()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	firstLayer := 22 // hash(2) + size(2) + nameOffset(2) + name(16)
-	if len(data) != firstLayer+8*layerStride+1+1+10 {
-		t.Errorf("serialized len = %d, want %d (header + 8*%d + voice + priority + envelope)",
-			len(data), firstLayer+8*layerStride+1+1+10, layerStride)
-	}
-
-	// Every layer slot must be the same fixed size: layer 0 (active) and
-	// layers 1-7 (empty placeholders) alike.
-	for i := 0; i < 8; i++ {
-		slot := data[firstLayer+i*layerStride : firstLayer+(i+1)*layerStride]
-		if len(slot) != layerStride {
-			t.Errorf("layer %d slot size = %d, want %d", i, len(slot), layerStride)
-		}
-	}
-
-	// The active part's fields decode from the first layer slot.
-	slot := data[firstLayer : firstLayer+layerStride]
-	if slot[0] != 1 {
-		t.Errorf("enabled byte = %d, want 1", slot[0])
-	}
-	if got := binary.BigEndian.Uint16(slot[1:3]); got != 1 {
-		t.Errorf("part id = %d, want 1", got)
-	}
-	if got := binary.BigEndian.Uint16(slot[3:5]); got != 0x8201 {
-		t.Errorf("keymap ref = 0x%04x, want 0x8201", got)
-	}
-	if got := binary.BigEndian.Uint16(slot[5:7]); got != 60 {
-		t.Errorf("root note = %d, want 60", got)
-	}
-	if got := int16(binary.BigEndian.Uint16(slot[7:9])); got != -12 {
-		t.Errorf("transpose = %d, want -12", got)
-	}
-	if got := binary.BigEndian.Uint16(slot[9:11]); got != 100 {
-		t.Errorf("velocity = %d, want 100", got)
-	}
-
-	// The trailing voice-mode/priority/envelope bytes sit at the same
-	// offsets as an all-empty program.
-	if data[programVoiceModeOffset]&0x02 == 0 {
-		t.Errorf("voice mode byte = 0x%02x, want poly bit (0x02) set", data[programVoiceModeOffset])
-	}
-	if data[programVoiceModeOffset]&0x01 == 0 {
-		t.Errorf("voice mode byte = 0x%02x, want stereo bit (0x01) set", data[programVoiceModeOffset])
-	}
-	if got := data[programVoiceModeOffset+1]; got != 3 { // priority 4 - 1 = 3
-		t.Errorf("priority byte = %d, want 3 (priority 4 - 1)", got)
-	}
-	// Envelope: 9 bytes + 1 reserved, immediately after the priority byte.
+func TestDefaultPolyEnvelope(t *testing.T) {
 	e := DefaultPolyEnvelope()
-	wantEnv := []byte{e.Attack, e.Decay1, e.Level1, e.Decay2, e.Level2, e.Decay3, e.Level3, e.Sustain, e.Release, 0}
-	gotEnv := data[programVoiceModeOffset+2 : programVoiceModeOffset+12]
-	for i := range wantEnv {
-		if gotEnv[i] != wantEnv[i] {
-			t.Errorf("envelope byte[%d] = %d, want %d", i, gotEnv[i], wantEnv[i])
-		}
-	}
-}
-
-// -----------------------------------------------------------------------
-// Tests for Program.CalculateSize
-// -----------------------------------------------------------------------
-
-func TestProgram_CalculateSize(t *testing.T) {
-	t.Run("size is positive and even for empty program", func(t *testing.T) {
-		p := NewProgram(1, "Test", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-		size, err := p.CalculateSize()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if size <= 0 {
-			t.Errorf("size = %d, want > 0", size)
-		}
-		if size%2 != 0 {
-			t.Errorf("size = %d, want even (2-byte padded)", size)
-		}
-	})
-
-	t.Run("size at least as large as serialized data", func(t *testing.T) {
-		p := NewProgram(2, "Check", VoiceModePoly, 3, true, DefaultPolyEnvelope())
-		data, err := p.Serialize()
-		if err != nil {
-			t.Fatalf("serialize error: %v", err)
-		}
-		size, err := p.CalculateSize()
-		if err != nil {
-			t.Fatalf("calculate size error: %v", err)
-		}
-		if size < len(data) {
-			t.Errorf("CalculateSize() = %d, less than serialized len %d", size, len(data))
-		}
-	})
-}
-
-// -----------------------------------------------------------------------
-// Integration: round-trip via KRZFile.Serialize
-// -----------------------------------------------------------------------
-
-// TestProgram_InKRZFile verifies a program serializes correctly inside a
-// full KRZ file (hash appears in the object table).
-func TestProgram_InKRZFile(t *testing.T) {
-	f := NewKRZFile(1)
-
-	km := NewKeymap(1, "KM")
-	km.AddSample([]int16{100, 200, 150}, 60, 60, 60, 2, false)
-	f.AddKeymap(km)
-
-	p := NewProgram(1, "Prog", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-	p.AddPart(Part{
-		Enabled:   true,
-		PartID:    1,
-		KeymapRef: km.Hash,
-		RootNote:  60,
-		Velocity:  100,
-		Pan:       64,
-		Output:    1,
-		LoKey:     0,
-		HiKey:     127,
-		LoVel:     0,
-		HiVel:     127,
-	})
-	f.AddProgram(p)
-
-	data, err := f.Serialize()
-	if err != nil {
-		t.Fatalf("KRZFile.Serialize() error: %v", err)
-	}
-
-	if len(data) == 0 {
-		t.Error("serialized KRZ file is empty")
-	}
-	// Magic bytes check ("PRAM")
-	expected := []byte{'P', 'R', 'A', 'M'}
-	for i, b := range expected {
-		if data[i] != b {
-			t.Errorf("magic byte[%d] = 0x%02x, want 0x%02x", i, data[i], b)
-		}
-	}
-}
-
-// -----------------------------------------------------------------------
-// Benchmarks
-// -----------------------------------------------------------------------
-
-// BenchmarkProgram_Serialize measures program serialization performance.
-func BenchmarkProgram_Serialize(b *testing.B) {
-	p := NewProgram(1, "BenchProg", VoiceModeDrum, 1, false, DefaultDrumEnvelope())
-	p.AddPart(Part{
-		Enabled:   true,
-		PartID:    1,
-		KeymapRef: 0x8201,
-		RootNote:  60,
-		Velocity:  100,
-		Pan:       64,
-		LoKey:     0,
-		HiKey:     127,
-	})
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = p.Serialize()
+	if e.Attack != 5 || e.Release != 40 {
+		t.Errorf("unexpected poly envelope defaults: %+v", e)
 	}
 }

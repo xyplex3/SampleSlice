@@ -93,7 +93,6 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			Stereo:         v.GetBool("stereo"),
 			Envelope:       envelope,
 			EnvelopePreset: v.GetString("envelope-preset"),
-			Model:          uint16(v.GetUint("krz-model")),
 		},
 	}
 
@@ -127,7 +126,6 @@ func init() {
 	rootCmd.Flags().IntP("post", "P", 200, "Post-padding in ms after each transient (default: 200)")
 	rootCmd.Flags().StringP("format", "f", "mpc", "Output format: mpc, krz, both, or xpm (default: mpc)")
 	rootCmd.Flags().Uint("krz-version", 2000, "KRZ file version number (default: 2000)")
-	rootCmd.Flags().Uint("krz-model", 0, "KRZ target model ID; 0 = default (PC2/PC3, 0x0064). Override to target a different Kurzweil model.")
 	rootCmd.Flags().Bool("krz-compress", false, "Use ADPCM compression for KRZ samples (default: false)")
 	rootCmd.Flags().String("voice-mode", "drum", "KRZ voice mode: drum or poly (default: drum)")
 	rootCmd.Flags().Uint("priority", 0, "KRZ voice priority 1-8 (default: 7 for drum, 3 for poly)")
@@ -156,7 +154,6 @@ func init() {
 	mustBindFlag("pre", "pre")
 	mustBindFlag("post", "post")
 	mustBindFlag("krz-version", "krz-version")
-	mustBindFlag("krz-model", "krz-model")
 	mustBindFlag("krz-compress", "krz-compress")
 	mustBindFlag("voice-mode", "voice-mode")
 	mustBindFlag("priority", "priority")

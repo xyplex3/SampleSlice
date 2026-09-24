@@ -1,115 +1,48 @@
 // Package krz provides tools for creating and serializing Kurzweil KRZ
-// sample library files. It supports sample slicing, ADPCM compression,
-// multi-part programs, and configurable voice modes (drum and polyphonic).
+// sample library files. The on-disk layout implemented here — the "PRAM"
+// file header, the flat length-prefixed object stream, the object hash
+// formula, and the Program/Keymap/Sample object bodies — was reverse
+// engineered by directly decoding real, hardware-authored K2000 KRZ files
+// (KRZDRMS.KRZ and atari.KRZ), not derived from any third-party spec.
 //
 // Basic usage:
 //
 //	slices := []krz.SliceData{...}
-//	data, err := krz.CreateFromSlices(slices,
-//	    krz.WithFileName("MyLibrary"),
-//	    krz.WithVoiceMode(krz.VoiceModePoly),
-//	)
-//
-// The package handles binary serialization, keymap management, program
-// construction, and WAV-to-KRZ format conversion.
+//	data, err := krz.CreateFromSlices(slices, krz.WithFileName("MyDrums"))
 package krz
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
-
-	"sampleslice/config"
 )
 
-// errWriter wraps an io.Writer and records the first error encountered.
-// Subsequent writes are no-ops once an error is set, so callers can chain
-// writes and check ew.err once at the end.
-type errWriter struct {
-	w   io.Writer
-	err error
+// fileHeaderTail is the 24 bytes that follow the magic and osize fields in
+// every real KRZ file's 32-byte header. These bytes were identical across
+// every real file inspected regardless of content, so they're treated as
+// fixed format/version boilerplate rather than something callers configure.
+var fileHeaderTail = []byte{
+	0x00, 0x00, 0xcd, 0x08, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x01, 0x2d, 0x03, 0x10, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 }
 
-func (ew *errWriter) write(data any) {
-	if ew.err == nil {
-		ew.err = binary.Write(ew.w, binary.BigEndian, data)
-	}
-}
-
-func (ew *errWriter) writeBytes(p []byte) {
-	if ew.err == nil {
-		_, ew.err = ew.w.Write(p)
-	}
-}
-
-// VoiceMode determines how a KRZ voice behaves: either as a fixed-pitch drum (mono)
-// or as a multi-note polyphonic instrument using sample rate modulation.
-type VoiceMode int
-
-const (
-	VoiceModeDrum VoiceMode = iota // Fixed-pitch mono, one voice per drum note
-	VoiceModePoly                   // Multi-note polyphonic via sample rate modulation
-)
-
-// Envelope is the shared ASDR envelope type for KRZ layers.
-// It aliases config.Envelope so callers can pass config.Envelope values directly
-// without a conversion step.
-type Envelope = config.Envelope
-
-// DefaultDrumEnvelope returns a fast, tight envelope configuration optimized for percussive sounds
-// with quick attack, moderate decay, and short release.
-func DefaultDrumEnvelope() Envelope {
-	return Envelope{
-		Attack:  0,
-		Decay1:  20,
-		Level1:  70,
-		Decay2:  30,
-		Level2:  0,
-		Decay3:  0,
-		Level3:  0,
-		Sustain: 0,
-		Release: 5,
-	}
-}
-
-// DefaultPolyEnvelope returns a smooth, expressive envelope configuration suitable for polyphonic
-// hits and pad sounds with gradual attack, multi-stage decay, and longer release.
-func DefaultPolyEnvelope() Envelope {
-	return Envelope{
-		Attack:  5,
-		Decay1:  40,
-		Level1:  70,
-		Decay2:  60,
-		Level2:  30,
-		Decay3:  80,
-		Level3:  0,
-		Sustain: 0,
-		Release: 40,
-	}
-}
-
-// KRZFile represents a complete Kurzweil KRZ file.
-// It contains keymaps (sample collections) and programs (multi-part instrument definitions)
-// that can be serialized into the binary KRZ format for use on Kurzweil synthesizers.
+// KRZFile represents a complete Kurzweil KRZ file: a header, a flat object
+// section (samples, keymaps, and programs, in that declaration order), and
+// a shared PCM data region that Sample objects address by word offset.
 type KRZFile struct {
-	// Version is the KRZ file format version number.
-	Version uint16
-	// Models is the list of compatible Kurzweil model identifiers.
-	Models []uint16
-	// Keymaps is the collection of sample keymaps in the file.
-	Keymaps []*Keymap
-	// Programs is the collection of instrument programs in the file.
+	Samples  []*Sample
+	Keymaps  []*Keymap
 	Programs []*Program
 }
 
-// NewKRZFile creates a new KRZ file with the specified format version and a default model (PC2/PC3).
-func NewKRZFile(version uint16) *KRZFile {
-	return &KRZFile{
-		Version: version,
-		Models:  []uint16{0x0064}, // Default model (PC2/PC3)
-	}
+// NewKRZFile creates an empty KRZ file.
+func NewKRZFile() *KRZFile {
+	return &KRZFile{}
+}
+
+// AddSample appends a sample to the file's sample pool.
+func (f *KRZFile) AddSample(s *Sample) {
+	f.Samples = append(f.Samples, s)
 }
 
 // AddKeymap appends a keymap to the file's keymap collection.
@@ -122,9 +55,11 @@ func (f *KRZFile) AddProgram(prog *Program) {
 	f.Programs = append(f.Programs, prog)
 }
 
-// Serialize converts the KRZ file to its binary representation.
-// It writes the file header, object table entries, and serialized object data
-// for all keymaps and programs. Returns an error if the file contains no keymaps or programs.
+// Serialize converts the KRZ file to its binary representation: a 32-byte
+// header (magic "PRAM" + osize + fixed tail), the object section (each
+// Sample, then each Keymap, then each Program, as a length-prefixed block),
+// an int32(0) end marker, and finally the raw 16-bit big-endian PCM data
+// referenced by the Sample objects' word offsets.
 func (f *KRZFile) Serialize() ([]byte, error) {
 	if len(f.Keymaps) == 0 {
 		return nil, errors.New("KRZ file must contain at least one keymap")
@@ -133,116 +68,51 @@ func (f *KRZFile) Serialize() ([]byte, error) {
 		return nil, errors.New("KRZ file must contain at least one program")
 	}
 
-	var buf bytes.Buffer
-	ew := &errWriter{w: &buf}
-
-	// ---- File Header (16 bytes) ----
-	// Magic bytes "PRAM" (the K2000's battery-backed Program RAM, confirmed
-	// via the official service manual and independent K2000 user reports).
-	ew.writeBytes([]byte{0x50, 0x52, 0x41, 0x4D}) // "PRAM"
-
-	// Version
-	ew.write(f.Version)
-
-	// Model count
-	ew.write(uint16(len(f.Models)))
-
-	// Model list
-	for _, model := range f.Models {
-		ew.write(model)
+	var body []byte
+	for _, s := range f.Samples {
+		body = append(body, s.Serialize()...)
 	}
-
-	// Object count (keymaps + programs)
-	objCount := uint16(len(f.Keymaps) + len(f.Programs))
-	ew.write(objCount)
-
-	if ew.err != nil {
-		return nil, fmt.Errorf("writing KRZ header: %w", ew.err)
-	}
-
-	// ---- Object Table ----
-	// Calculate offset to first object data (header + table). headerSize must
-	// match exactly what was written above: magic(4) + version(2) +
-	// modelCount(2) + models(2*len) + objCount(2). It cannot be a fixed
-	// constant because len(f.Models) varies (e.g. via WithModels) — a fixed
-	// value here would silently desync the recorded table offsets from where
-	// object data actually starts.
-	headerSize := 4 + 2 + 2 + 2*len(f.Models) + 2
-	tableEntrySize := 6 // 2 bytes hash + 4 bytes offset
-	tableSize := int(objCount) * tableEntrySize
-	firstObjectOffset := headerSize + tableSize
-	// Pad to 2-byte boundary
-	if firstObjectOffset%2 != 0 {
-		firstObjectOffset++
-	}
-
-	// Calculate all object sizes and offsets first
-	type objectInfo struct {
-		data   []byte
-		size   int
-		offset int
-	}
-
-	objects := make([]objectInfo, 0, int(objCount))
-	currentOffset := firstObjectOffset
-
-	// Serialize keymaps first
 	for _, km := range f.Keymaps {
-		data, err := km.Serialize()
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize keymap: %w", err)
-		}
-		paddedSize := (len(data) + 1) & ^1 // Pad to 2-byte boundary
-		objects = append(objects, objectInfo{
-			data:   data,
-			size:   paddedSize,
-			offset: currentOffset,
-		})
-		currentOffset += paddedSize
+		body = append(body, km.Serialize()...)
 	}
-
-	// Serialize programs
 	for _, prog := range f.Programs {
-		data, err := prog.Serialize()
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize program: %w", err)
-		}
-		paddedSize := (len(data) + 1) & ^1
-		objects = append(objects, objectInfo{
-			data:   data,
-			size:   paddedSize,
-			offset: currentOffset,
-		})
-		currentOffset += paddedSize
+		body = append(body, prog.Serialize()...)
+	}
+	body = binary.BigEndian.AppendUint32(body, 0) // end marker
+
+	osize := 32 + len(body)
+
+	out := make([]byte, 0, osize+f.pcmLen())
+	out = append(out, 0x50, 0x52, 0x41, 0x4D) // "PRAM"
+	out = binary.BigEndian.AppendUint32(out, uint32(osize))
+	out = append(out, fileHeaderTail...)
+	out = append(out, body...)
+
+	for _, s := range f.Samples {
+		out = append(out, s.pcmBytes...)
 	}
 
-	// Write object table entries: 2-byte hash + 4-byte file offset per entry.
-	for _, obj := range objects {
-		// Hash (first 2 bytes of object data)
-		ew.write(binary.BigEndian.Uint16(obj.data[0:2]))
-		// Offset from start of file
-		ew.write(uint32(obj.offset))
-	}
+	return out, nil
+}
 
-	// Pad table to 2-byte boundary if needed
-	if buf.Len()%2 != 0 {
-		ew.writeBytes([]byte{0x00})
+// pcmLen returns the total size, in bytes, of all samples' PCM data.
+func (f *KRZFile) pcmLen() int {
+	n := 0
+	for _, s := range f.Samples {
+		n += len(s.pcmBytes)
 	}
+	return n
+}
 
-	// Write object data
-	for _, obj := range objects {
-		ew.writeBytes(obj.data)
-		// Pad to 2-byte boundary
-		if buf.Len()%2 != 0 {
-			ew.writeBytes([]byte{0x00})
-		}
+// validateMidiNote clamps a MIDI note value to the valid range 0-127.
+func validateMidiNote(note int) uint8 {
+	if note < 0 {
+		return 0
 	}
-
-	if ew.err != nil {
-		return nil, fmt.Errorf("writing KRZ body: %w", ew.err)
+	if note > 127 {
+		return 127
 	}
-
-	return buf.Bytes(), nil
+	return uint8(note)
 }
 
 // truncateName truncates a name to maxLen bytes.
@@ -251,25 +121,6 @@ func truncateName(name string, maxLen int) string {
 		return name[:maxLen]
 	}
 	return name
-}
-
-// validateMidiNote clamps a MIDI note value to the valid range 0-127.
-func validateMidiNote(note int) uint16 {
-	if note < 0 {
-		return 0
-	}
-	if note > 127 {
-		return 127
-	}
-	return uint16(note)
-}
-
-// validateMidiNoteUint clamps a uint16 MIDI note value to the valid range 0-127.
-func validateMidiNoteUint(note uint16) uint16 {
-	if note > 127 {
-		return 127
-	}
-	return note
 }
 
 // SliceData represents a single sliced audio region.
@@ -292,31 +143,29 @@ type CreateOption func(*createConfig)
 
 // baseUserObjectID is the first object ID in the K2000's user/RAM object
 // space; IDs 0-199 are reserved for ROM/factory banks (confirmed via the
-// K2000/K2000RS service manual's memory-bank documentation).
+// K2000/K2000RS service manual's memory-bank documentation, and via real
+// KRZ files whose user-created objects all start numbering at 200).
 const baseUserObjectID = 200
 
 // createConfig holds the configuration for CreateFromSlices.
 type createConfig struct {
-	fileName  string
-	version   uint16
-	compress  bool
-	voiceMode VoiceMode
-	priority  uint8
-	stereo    bool
-	envelope  Envelope
-	models    []uint16
+	fileName   string
+	compress   bool
+	voiceMode  VoiceMode
+	priority   uint8
+	stereo     bool
+	envelope   Envelope
+	sampleRate uint32
 }
 
 // defaultCreateConfig returns a createConfig with sensible defaults.
 func defaultCreateConfig() createConfig {
 	return createConfig{
-		fileName:  "SliceProgram",
-		version:   0x0001,
-		compress:  false,
-		voiceMode: VoiceModeDrum,
-		priority:  1,
-		stereo:    false,
-		envelope:  DefaultDrumEnvelope(),
+		fileName:   "SliceProgram",
+		voiceMode:  VoiceModeDrum,
+		priority:   1,
+		envelope:   DefaultDrumEnvelope(),
+		sampleRate: 44100,
 	}
 }
 
@@ -327,72 +176,67 @@ func WithFileName(name string) CreateOption {
 	}
 }
 
-// WithVersion sets the KRZ file format version.
-func WithVersion(version uint16) CreateOption {
-	return func(c *createConfig) {
-		c.version = version
-	}
+// WithVersion is accepted for API compatibility but has no effect: the real
+// KRZ header has no per-file "version" field (see fileHeaderTail).
+func WithVersion(uint16) CreateOption {
+	return func(*createConfig) {}
 }
 
-// WithCompression enables or disables ADPCM compression.
-func WithCompression(compress bool) CreateOption {
-	return func(c *createConfig) {
-		c.compress = compress
-	}
+// WithCompression is accepted for API compatibility but has no effect: the
+// real KRZ sample format is always raw 16-bit signed PCM. No ADPCM or
+// 8-bit sample format was found in any real file inspected.
+func WithCompression(bool) CreateOption {
+	return func(*createConfig) {}
 }
 
-// WithVoiceMode sets the voice mode (drum or poly).
+// WithVoiceMode sets the voice mode (drum or poly). See the Envelope doc
+// comment in program.go: this does not yet affect the serialized bytes.
 func WithVoiceMode(mode VoiceMode) CreateOption {
 	return func(c *createConfig) {
 		c.voiceMode = mode
 	}
 }
 
-// WithPriority sets the voice priority (1-8).
+// WithPriority sets the voice priority (1-8). Currently a no-op; see the
+// Envelope doc comment in program.go.
 func WithPriority(priority uint8) CreateOption {
 	return func(c *createConfig) {
 		c.priority = priority
 	}
 }
 
-// WithStereo enables or disables stereo voice mode.
+// WithStereo enables or disables stereo voice mode. Currently a no-op; see
+// the Envelope doc comment in program.go.
 func WithStereo(stereo bool) CreateOption {
 	return func(c *createConfig) {
 		c.stereo = stereo
 	}
 }
 
-// WithEnvelope sets the ADSR envelope.
+// WithEnvelope sets the ADSR envelope. Currently a no-op; see the Envelope
+// doc comment in program.go.
 func WithEnvelope(envelope Envelope) CreateOption {
 	return func(c *createConfig) {
 		c.envelope = envelope
 	}
 }
 
-// WithModels overrides the list of Kurzweil model IDs the file declares
-// itself compatible with (default: PC2/PC3, 0x0064). Set this to target a
-// specific unit, e.g. a K2000/K2VX-family model, when the default isn't
-// compatible with the destination hardware.
-func WithModels(models []uint16) CreateOption {
+// WithSampleRate sets the sample rate (Hz) used to compute each sample's
+// pitch/period fields. Defaults to 44100.
+func WithSampleRate(rate uint32) CreateOption {
 	return func(c *createConfig) {
-		c.models = models
+		c.sampleRate = rate
 	}
 }
 
 // CreateFromSlices creates a KRZ file from sliced audio data.
 //
-// Parameters:
-//
-//	slices: audio regions with sample data and target MIDI notes
-//	opts: functional options for configuring the output (fileName, version, compress, etc.)
-//
-// Example:
-//
-//	data, err := CreateFromSlices(slices,
-//	    WithFileName("MyDrums"),
-//	    WithVoiceMode(VoiceModePoly),
-//	    WithCompression(true),
-//	)
+// It builds, per slice, a Sample object, a single-sample Keymap referencing
+// it, and a Program referencing that Keymap — exactly the three-object
+// chain a real K2000 uses for one drum hit. A "master" Keymap (mapping each
+// slice's MIDI note to its Program's ID) and a "master" Program referencing
+// it tie the kit together into the one Program a user actually selects,
+// mirroring how real K2000 drum-kit banks are structured.
 func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) {
 	if len(slices) == 0 {
 		return nil, errors.New("no slices provided")
@@ -403,61 +247,59 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 		opt(&cfg)
 	}
 
-	krz := NewKRZFile(cfg.version)
-	if len(cfg.models) > 0 {
-		krz.Models = cfg.models
+	file := NewKRZFile()
+
+	masterID := uint16(baseUserObjectID)
+	firstSliceID := uint16(baseUserObjectID + 1)
+	masterKeymap := NewMasterKeymap(masterID, truncateName(cfg.fileName, 16), firstSliceID)
+
+	var pcmWord uint32
+	for i, s := range slices {
+		id := uint16(baseUserObjectID + 1 + i)
+		note := validateMidiNote(s.Note)
+		name := truncateName(sliceObjectName(i), 16)
+
+		sample := &Sample{
+			ID:         id,
+			Name:       name,
+			RootNote:   note,
+			SampleRate: cfg.sampleRate,
+			NumSamples: len(s.Samples),
+			StartWord:  pcmWord,
+		}
+		sample.pcmBytes = int16SamplesToBE(s.Samples)
+		pcmWord += uint32(len(s.Samples))
+		file.AddSample(sample)
+
+		file.AddKeymap(NewSingleSampleKeymap(id, name, id))
+		file.AddProgram(NewProgram(id, name, id, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope))
+
+		if int(note) < len(masterKeymap.entries) {
+			masterKeymap.SetEntry(int(note), id)
+		}
 	}
 
-	// Create a single keymap with all slices as samples. Object IDs start at
-	// baseUserObjectID (200): 0-199 are reserved for ROM/factory objects.
-	keymap := NewKeymap(baseUserObjectID, truncateName("SliceKeymap", 16))
+	file.AddKeymap(masterKeymap)
+	file.AddProgram(NewProgram(masterID, truncateName(cfg.fileName, 16), masterID, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope))
 
-	// Determine sample format. 2 = 16-bit signed (full quality, the native
-	// precision of SliceData.Samples); 3 = ADPCM when compression is requested.
-	sampleFormat := 2
-	if cfg.compress {
-		sampleFormat = 3 // ADPCM
+	return file.Serialize()
+}
+
+// sliceObjectName returns a short, unique per-slice object name.
+func sliceObjectName(i int) string {
+	const letters = "0123456789"
+	n := i + 1
+	if n < 1000 {
+		return "slice" + string(letters[n/100%10]) + string(letters[n/10%10]) + string(letters[n%10])
 	}
+	return "slice" + string(letters[n%10])
+}
 
-	// Add each slice as a sample in the keymap
-	for _, s := range slices {
-		rootNote := validateMidiNote(s.Note)
-
-		keymap.AddSample(
-			s.Samples,
-			rootNote,
-			rootNote,
-			rootNote,
-			sampleFormat,
-			cfg.compress,
-		)
+// int16SamplesToBE converts signed 16-bit PCM samples to raw big-endian bytes.
+func int16SamplesToBE(samples []int16) []byte {
+	out := make([]byte, len(samples)*2)
+	for i, s := range samples {
+		binary.BigEndian.PutUint16(out[i*2:i*2+2], uint16(s))
 	}
-
-	krz.AddKeymap(keymap)
-
-	// Create a program that references the keymap
-	programName := truncateName(cfg.fileName, 16)
-	program := NewProgram(baseUserObjectID, programName, cfg.voiceMode, cfg.priority, cfg.stereo, cfg.envelope)
-
-	// Create a single part that uses the keymap
-	part := Part{
-		Enabled:   true,
-		PartID:    1,
-		KeymapRef: keymap.Hash,
-		RootNote:  60,
-		Velocity:  100,
-		Pan:       64, // Center
-		Output:    1,
-		LoKey:     0,
-		HiKey:     127,
-		LoVel:     0,
-		HiVel:     127,
-		Loop:      false,
-	}
-
-	program.AddPart(part)
-	krz.AddProgram(program)
-
-	// Serialize the KRZ file
-	return krz.Serialize()
+	return out
 }

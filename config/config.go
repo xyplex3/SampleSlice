@@ -152,14 +152,13 @@ type DetectionConfig struct {
 
 // KRZConfig groups Kurzweil KRZ-specific output parameters.
 type KRZConfig struct {
-	Version        uint16      // KRZ file format version (default: 2000)
-	Compress       bool        // Use ADPCM compression for KRZ samples
-	VoiceMode      VoiceMode   // drum or poly
-	Priority       uint8       // Voice priority 1-8
-	Stereo         bool        // Enable stereo voice mode (for poly patches)
-	Envelope       Envelope    // Custom ADSR envelope
-	EnvelopePreset string      // Envelope preset name (drum, perc, pad, key)
-	Model          uint16      // Target Kurzweil model ID; 0 = default (PC2/PC3, 0x0064)
+	Version        uint16    // KRZ file format version (default: 2000)
+	Compress       bool      // Use ADPCM compression for KRZ samples
+	VoiceMode      VoiceMode // drum or poly
+	Priority       uint8     // Voice priority 1-8
+	Stereo         bool      // Enable stereo voice mode (for poly patches)
+	Envelope       Envelope  // Custom ADSR envelope
+	EnvelopePreset string    // Envelope preset name (drum, perc, pad, key)
 	Layers         []LayerConfig
 }
 

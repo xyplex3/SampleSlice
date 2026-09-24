@@ -282,7 +282,6 @@ config file → built-in defaults.
 | `--note-map` | | | Custom note assignments, e.g. `0=36,1=42` |
 | `--report` | | *(disabled)* | Report format: `json` or `csv` |
 | `--krz-version` | | `2000` | KRZ file format version |
-| `--krz-model` | | `0` (PC2/PC3) | KRZ target model ID; override to target a different Kurzweil model |
 | `--krz-compress` | | `false` | ADPCM compression for KRZ samples |
 | `--voice-mode` | | `drum` | KRZ voice mode: `drum` or `poly` |
 | `--priority` | | `7`/`3` | KRZ voice priority (1–8) |
