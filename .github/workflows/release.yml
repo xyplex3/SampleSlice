@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          OUT="sampleslice"
+          if [ "$GOOS" = "windows" ]; then OUT="sampleslice.exe"; fi
+          go build -ldflags "-X sampleslice/cmd.Version=${VERSION} -X sampleslice/cmd.Commit=${COMMIT} -X sampleslice/cmd.BuildDate=${BUILD_DATE}" -o "dist/${OUT}" .
+
+      - name: Package
+        run: |
+          NAME="sampleslice_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "release/${NAME}"
+          cp README.md "release/${NAME}/"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            cp dist/sampleslice.exe "release/${NAME}/"
+            (cd release && zip -r "${NAME}.zip" "${NAME}")
+          else
+            cp dist/sampleslice "release/${NAME}/"
+            (cd release && tar -czf "${NAME}.tar.gz" "${NAME}")
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sampleslice_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum * > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
