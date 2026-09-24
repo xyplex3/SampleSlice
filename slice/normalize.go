@@ -1,7 +1,8 @@
 package slice
 
-// NormalizeSlice peak-normalizes samples to 0 dBFS.
-// Silent slices (peak == 0) and already clipped slices (peak >= 1.0) are returned unchanged.
+// NormalizeSlice peak-normalizes samples to 0 dBFS. Silent slices
+// (peak == 0) and already clipped slices (peak >= 1.0) are returned
+// unchanged.
 func NormalizeSlice(samples []float64) []float64 {
 	peak := 0.0
 	for _, s := range samples {

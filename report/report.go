@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"sampleslice/midi"
 	"sampleslice/slice"
@@ -13,15 +14,15 @@ import (
 
 // SliceEntry describes one detected slice in the report.
 type SliceEntry struct {
-	Index       int     `json:"index"`       // Zero-based slice index
-	Note        string  `json:"note"`        // Assigned MIDI note name (e.g. "C3")
-	MIDINote    int     `json:"midi_note"`   // MIDI note number (0-127)
+	Index       int     `json:"index"`        // Zero-based slice index
+	Note        string  `json:"note"`         // Assigned MIDI note name (e.g. "C3")
+	MIDINote    int     `json:"midi_note"`    // MIDI note number (0-127)
 	StartSample int     `json:"start_sample"` // Start sample index in the source audio
 	EndSample   int     `json:"end_sample"`   // End sample index in the source audio
-	StartSec    float64 `json:"start_sec"`   // Start time in seconds
-	EndSec      float64 `json:"end_sec"`     // End time in seconds
+	StartSec    float64 `json:"start_sec"`    // Start time in seconds
+	EndSec      float64 `json:"end_sec"`      // End time in seconds
 	DurationSec float64 `json:"duration_sec"` // Duration in seconds
-	Energy      float64 `json:"energy"`      // Normalized RMS energy at the transient onset
+	Energy      float64 `json:"energy"`       // Normalized RMS energy at the transient onset
 }
 
 // Report is the top-level structure written by [WriteJSON] and [WriteCSV].
@@ -100,11 +101,11 @@ func WriteCSV(path string, r *Report) error {
 	}
 	for _, e := range r.Slices {
 		row := []string{
-			fmt.Sprintf("%d", e.Index),
+			strconv.Itoa(e.Index),
 			e.Note,
-			fmt.Sprintf("%d", e.MIDINote),
-			fmt.Sprintf("%d", e.StartSample),
-			fmt.Sprintf("%d", e.EndSample),
+			strconv.Itoa(e.MIDINote),
+			strconv.Itoa(e.StartSample),
+			strconv.Itoa(e.EndSample),
 			fmt.Sprintf("%.6f", e.StartSec),
 			fmt.Sprintf("%.6f", e.EndSec),
 			fmt.Sprintf("%.6f", e.DurationSec),

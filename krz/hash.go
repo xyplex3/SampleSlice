@@ -17,12 +17,14 @@ func GenerateHash(id uint16, objectType uint16) uint16 {
 	return (objectType << 10) | (id & 0x3FF)
 }
 
-// TypeFromHash extracts the object type code from a hash produced by [GenerateHash].
+// TypeFromHash extracts the object type code from a hash produced by
+// [GenerateHash].
 func TypeFromHash(hash uint16) uint16 {
 	return hash >> 10
 }
 
-// IDFromHash extracts the object ID (low 10 bits) from a hash produced by [GenerateHash].
+// IDFromHash extracts the object ID (low 10 bits) from a hash produced by
+// [GenerateHash].
 func IDFromHash(hash uint16) uint16 {
 	return hash & 0x3FF
 }

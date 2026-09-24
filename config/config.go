@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -61,7 +62,8 @@ type Envelope struct {
 	Rel3Time  uint8 // Time for the final release stage, down to silence
 }
 
-// IsEmpty reports whether all envelope fields are zero (the default unset state).
+// IsEmpty reports whether all envelope fields are zero (the default unset
+// state).
 func (e *Envelope) IsEmpty() bool {
 	return *e == Envelope{}
 }
@@ -103,7 +105,7 @@ func GetEnvelopePreset(name string) (Envelope, bool) {
 // ParseEnvelope parses a comma-separated string of 13 uint8 values into an
 // Envelope. Format: "att1level,att1time,att2level,att2time,att3level,
 // att3time,dec1level,dec1time,rel1level,rel1time,rel2level,rel2time,
-// rel3time" (values 0-255)
+// rel3time" (values 0-255).
 func ParseEnvelope(s string) (Envelope, error) {
 	const fieldList = "att1level,att1time,att2level,att2time,att3level,att3time,dec1level,dec1time,rel1level,rel1time,rel2level,rel2time,rel3time"
 	parts := strings.Split(s, ",")
@@ -113,8 +115,8 @@ func ParseEnvelope(s string) (Envelope, error) {
 	vals := make([]uint8, 13)
 	for i, p := range parts {
 		p = strings.TrimSpace(p)
-		var n int
-		if _, err := fmt.Sscanf(p, "%d", &n); err != nil {
+		n, err := strconv.Atoi(p)
+		if err != nil {
 			return Envelope{}, fmt.Errorf("value %d (%q) is not a valid integer: %w", i+1, p, err)
 		}
 		if n < 0 || n > 255 {

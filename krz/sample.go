@@ -40,7 +40,12 @@ func (s *Sample) Hash() uint16 {
 // note expressed in cents, adjusted for how its stored rate compares to a
 // 48kHz reference. Confirmed exactly against two real samples at different
 // root notes and rates: maxPitch = round(100*rootNote + 1200*log2(48000/sr)).
+// A zero SampleRate (otherwise undefined for this formula) falls back to
+// the unadjusted root-note-in-cents value.
 func (s *Sample) maxPitch() int16 {
+	if s.SampleRate == 0 {
+		return int16(100 * s.RootNote)
+	}
 	v := 100*float64(s.RootNote) + 1200*math.Log2(48000/float64(s.SampleRate))
 	return int16(math.Round(v))
 }

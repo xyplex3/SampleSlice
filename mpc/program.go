@@ -121,7 +121,8 @@ func padColorForIndex(index int) PadColor {
 //	              39   2  Tuning, signed cents (-1200 to +1200)
 //	              41   2  Reserved
 //
-// Note: this is a SampleSlice-defined format; it is not the official Akai XPM/PRG XML format.
+// Note: this is a SampleSlice-defined format; it is not the official Akai
+// XPM/PRG XML format.
 func writePrgFile(path string, program *Program) error {
 	file, err := os.Create(path)
 	if err != nil {
@@ -260,8 +261,9 @@ func ValidateProgram(program *Program) []string {
 	return warnings
 }
 
-// CountSlicesForProgram returns how many slices fit in a single program (up to
-// [MaxPadsPerProg]) and how many additional programs are needed for the remainder.
+// CountSlicesForProgram returns how many slices fit in a single program
+// (up to [MaxPadsPerProg]) and how many additional programs are needed for
+// the remainder.
 func CountSlicesForProgram(count int) (firstProgramCount int, additionalPrograms int) {
 	if count <= MaxPadsPerProg {
 		return count, 0
@@ -320,7 +322,8 @@ func GenerateMultiProgram(slices []slice.AudioSlice, baseName string, outputDir 
 	return programs, nil
 }
 
-// SanitizeProgramName removes or replaces characters that are not valid in file names.
+// SanitizeProgramName removes or replaces characters that are not valid
+// in file names.
 func SanitizeProgramName(name string) string {
 	var result strings.Builder
 	for _, r := range name {

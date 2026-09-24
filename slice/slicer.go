@@ -36,14 +36,17 @@ type AudioSlice struct {
 	Transient   detect.Transient // The transient that triggered this slice
 }
 
-// msPerSecond is the number of milliseconds in a second, used for padding calculations.
+// msPerSecond is the number of milliseconds in a second, used for padding
+// calculations.
 const msPerSecond = 1000
 
-// SliceAudio takes audio samples and detected transients, then produces individual slices.
+// SliceAudio takes audio samples and detected transients, then produces
+// individual slices.
 //
-// Each slice starts at the transient position minus pre-padding and ends at the
-// midpoint between consecutive transients plus post-padding. The last slice extends
-// to the end of the audio buffer. Notes ascend chromatically from the root note.
+// Each slice starts at the transient position minus pre-padding and ends
+// at the midpoint between consecutive transients plus post-padding. The
+// last slice extends to the end of the audio buffer. Notes ascend
+// chromatically from the root note.
 //
 // Parameters:
 //   - samples: the full mono audio buffer normalized to [-1, 1]
@@ -101,10 +104,11 @@ func SliceAudio(samples []float64, transients []detect.Transient, sampleRate uin
 	return slices
 }
 
-// ExtractSamples extracts the samples for a given slice from the full buffer.
-// Returns nil if the slice starts beyond the buffer.
-// The returned slice aliases the original buffer — callers must not modify it in place.
-// The input AudioSlice is passed by value to avoid mutating the caller's data.
+// ExtractSamples extracts the samples for a given slice from the full
+// buffer. Returns nil if the slice starts beyond the buffer. The returned
+// slice aliases the original buffer — callers must not modify it in
+// place. The input AudioSlice is passed by value to avoid mutating the
+// caller's data.
 func ExtractSamples(samples []float64, s AudioSlice) []float64 {
 	if s.StartSample >= len(samples) {
 		return nil
@@ -132,7 +136,8 @@ func SortBySamplePos(slices []AudioSlice) {
 	})
 }
 
-// noteForIndex generates a note name for a given slice index, starting from the root note.
+// noteForIndex generates a note name for a given slice index, starting
+// from the root note.
 func noteForIndex(index int, startNoteIdx int, octave int) string {
 	totalIdx := startNoteIdx + index
 	currentOctave := octave + totalIdx/12

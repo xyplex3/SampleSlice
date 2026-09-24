@@ -32,8 +32,8 @@ func ReadWAV(path string) (*WAVFile, error) {
 	return parseWAV(f)
 }
 
-// parseWAV reads WAV format chunks from an io.Reader and returns a parsed WAVFile.
-// It processes "fmt " and "data" chunks, skipping unknown chunks.
+// parseWAV reads WAV format chunks from an io.Reader and returns a parsed
+// WAVFile. It processes "fmt " and "data" chunks, skipping unknown chunks.
 func parseWAV(r io.Reader) (*WAVFile, error) {
 	// Read RIFF header
 	header := make([]byte, 12)
@@ -126,6 +126,13 @@ func parseWAV(r io.Reader) (*WAVFile, error) {
 // decodePCM converts raw PCM bytes to normalized float64 mono samples.
 // Stereo channels are downmixed by averaging.
 func decodePCM(data []byte, channels uint16, bitsPerSample uint16) ([]float64, error) {
+	if channels == 0 {
+		return nil, fmt.Errorf("invalid channel count: %d", channels)
+	}
+	if bitsPerSample < 8 {
+		return nil, fmt.Errorf("invalid bits per sample: %d", bitsPerSample)
+	}
+
 	bytesPerSample := bitsPerSample / 8
 	bytesPerFrame := int(channels) * int(bytesPerSample)
 

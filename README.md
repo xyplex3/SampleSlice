@@ -1,9 +1,26 @@
 # SampleSlice
 
+![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 SampleSlice turns long recording sessions into ready-to-use drum samples and
 loop libraries. Point it at a WAV file and it automatically detects every hit,
 slices the audio apart, and exports the results directly into Akai MPC or
 Kurzweil sampler formats. No DAW or manual editing required.
+
+## Table of contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Supported WAV input](#supported-wav-input)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Shell completion](#shell-completion)
+- [Testing](#testing)
+- [About the author](#about-the-author)
+- [License](#license)
 
 ## Overview
 
@@ -27,8 +44,9 @@ note assignment.
   inaudible silence (`--auto-trim`)
 - Deduplication: remove near-duplicate slices by waveform energy profile
   (`--dedupe`)
-- KRZ voice control: drum or poly voice modes, ADPCM compression, envelope
-  presets, voice priority, and stereo
+- KRZ envelope shaping: built-in presets or a raw 13-value ADSR envelope
+- KRZ VAST tone borrowing: splice a real patch's algorithm/filter/pan/amp
+  settings from an existing KRZ file onto generated programs
 - Transient report: export slice timing and MIDI metadata as JSON or CSV
 - Shell completions: bash, zsh, fish, and PowerShell
 
@@ -44,12 +62,12 @@ note assignment.
 
 ### Prerequisites
 
-- Go 1.21 or higher
+- Go 1.26 or higher
 
 ### Build from source
 
 ```bash
-git clone https://github.com/yourusername/SampleSlice.git
+git clone https://github.com/xyplex3/SampleSlice.git
 cd SampleSlice
 go build -o sampleslice .
 ```
@@ -201,15 +219,6 @@ the program file.
 ### KRZ-specific options
 
 ```bash
-# Poly voice mode for melodic patches
-./sampleslice --input loop.wav --format krz --voice-mode poly
-
-# ADPCM compression to reduce file size
-./sampleslice --input loop.wav --format krz --krz-compress
-
-# Stereo output (poly mode only)
-./sampleslice --input loop.wav --format krz --voice-mode poly --stereo
-
 # Built-in envelope presets: drum, perc, pad, key
 ./sampleslice --input loop.wav --format krz --envelope-preset perc
 
@@ -218,14 +227,17 @@ the program file.
 #   rel2time,rel3time
 ./sampleslice --input loop.wav --format krz --envelope "100,0,0,0,0,0,0,10,0,0,0,0,5"
 
-# Voice priority 1–8 (default: 7 for drum, 3 for poly)
-./sampleslice --input loop.wav --format krz --priority 5
-
 # Borrow a real patch's VAST tone (algorithm + filter/pan/amp settings)
 # from an existing KRZ file and apply it to your sliced samples
 ./sampleslice --input loop.wav --format krz \
   --vast-from "MyLibrary.krz" --vast-program "Kick 909"
 ```
+
+`--voice-mode`, `--priority`, `--stereo`, and `--krz-compress` are accepted
+for forward/API compatibility but currently have **no effect** on the
+generated KRZ bytes (the CLI warns if you set `--voice-mode poly`,
+`--stereo`, or `--krz-compress`). Only `--envelope`/`--envelope-preset` and
+`--vast-from`/`--vast-program` actually change KRZ output today.
 
 ## Configuration
 
@@ -288,10 +300,10 @@ config file → built-in defaults.
 | `--note-map` | | | Custom note assignments, e.g. `0=36,1=42` |
 | `--report` | | *(disabled)* | Report format: `json` or `csv` |
 | `--krz-version` | | `2000` | KRZ file format version |
-| `--krz-compress` | | `false` | ADPCM compression for KRZ samples |
-| `--voice-mode` | | `drum` | KRZ voice mode: `drum` or `poly` |
-| `--priority` | | `7`/`3` | KRZ voice priority (1–8) |
-| `--stereo` | | `false` | Stereo KRZ voice mode (poly only) |
+| `--krz-compress` | | `false` | Reserved; no effect on KRZ output yet |
+| `--voice-mode` | | `drum` | Reserved; no effect on KRZ output yet |
+| `--priority` | | `7`/`3` | Reserved; no effect on KRZ output yet |
+| `--stereo` | | `false` | Reserved; no effect on KRZ output yet |
 | `--envelope` | | | Raw envelope: 13 comma-separated values (0–255) |
 | `--envelope-preset` | | | Envelope preset: `drum`, `perc`, `pad`, `key` |
 | `--vast-from` | | | Path to an existing KRZ file to borrow a VAST tone from |

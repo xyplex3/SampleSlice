@@ -16,9 +16,9 @@ type GridConfig struct {
 	RootNote    string  // root MIDI note for the first slice (e.g. "C3")
 }
 
-// SliceByGrid divides audio into equal-length segments aligned to the beat grid.
-// Returns nil if samples is empty or BPM is zero or negative.
-// Tail segments shorter than half a bar are discarded.
+// SliceByGrid divides audio into equal-length segments aligned to the beat
+// grid. Returns nil if samples is empty or BPM is zero or negative. Tail
+// segments shorter than half a bar are discarded.
 func SliceByGrid(samples []float64, sampleRate uint32, cfg GridConfig) []AudioSlice {
 	if len(samples) == 0 || cfg.BPM <= 0 {
 		return nil

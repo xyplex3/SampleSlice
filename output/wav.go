@@ -21,9 +21,9 @@ func WriteWAV(path string, samples []float64, sampleRate uint32) error {
 	return writeWAVToWriter(f, samples, sampleRate)
 }
 
-// writeWAVToWriter writes mono 16-bit PCM samples to an io.Writer in WAV format.
-// All data is assembled into a single buffer and written in one call to avoid
-// per-sample allocations on the hot path.
+// writeWAVToWriter writes mono 16-bit PCM samples to an io.Writer in WAV
+// format. All data is assembled into a single buffer and written in one
+// call to avoid per-sample allocations on the hot path.
 func writeWAVToWriter(w io.Writer, samples []float64, sampleRate uint32) error {
 	dataSize := len(samples) * 2 // 16-bit = 2 bytes per sample
 	buf := make([]byte, 44+dataSize)

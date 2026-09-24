@@ -7,8 +7,9 @@ import (
 	"sampleslice/config"
 )
 
-// VoiceMode determines how a KRZ voice behaves: either as a fixed-pitch drum (mono)
-// or as a multi-note polyphonic instrument using sample rate modulation.
+// VoiceMode determines how a KRZ voice behaves: either as a fixed-pitch
+// drum (mono) or as a multi-note polyphonic instrument using sample rate
+// modulation.
 type VoiceMode int
 
 const (
@@ -29,8 +30,9 @@ const (
 // do not yet change the serialized Program bytes.
 type Envelope = config.Envelope
 
-// DefaultDrumEnvelope returns a fast, tight envelope configuration optimized for percussive sounds
-// with quick attack, moderate decay, and short release.
+// DefaultDrumEnvelope returns a fast, tight envelope configuration
+// optimized for percussive sounds with quick attack, moderate decay, and
+// short release.
 func DefaultDrumEnvelope() Envelope {
 	return Envelope{
 		Att1Level: 100, Att1Time: 0,
@@ -39,8 +41,9 @@ func DefaultDrumEnvelope() Envelope {
 	}
 }
 
-// DefaultPolyEnvelope returns a smooth, expressive envelope configuration suitable for polyphonic
-// hits and pad sounds with gradual attack, multi-stage decay, and longer release.
+// DefaultPolyEnvelope returns a smooth, expressive envelope configuration
+// suitable for polyphonic hits and pad sounds with gradual attack,
+// multi-stage decay, and longer release.
 func DefaultPolyEnvelope() Envelope {
 	return Envelope{
 		Att1Level: 100, Att1Time: 5,

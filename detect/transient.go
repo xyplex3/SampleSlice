@@ -16,16 +16,18 @@ type Transient struct {
 	Energy    float64 // Normalized energy at the transient point
 }
 
-// DetectTransients performs energy-based onset detection on mono audio samples.
+// DetectTransients performs energy-based onset detection on mono audio
+// samples.
 //
 // Parameters:
 //   - samples: mono audio samples normalized to [-1, 1]
 //   - sampleRate: audio sample rate in Hz
 //   - sensitivity: detection threshold from 0.0 (very sensitive, more hits)
 //     to 1.0 (very strict, fewer hits)
-//   - minIntervalMs: minimum time between detected transients in milliseconds
-//     (avoids double-triggering)
-//   - windowSizeMs: energy analysis window in milliseconds; 0 uses the 10ms default
+//   - minIntervalMs: minimum time between detected transients in
+//     milliseconds (avoids double-triggering)
+//   - windowSizeMs: energy analysis window in milliseconds; 0 uses the
+//     10ms default
 //
 // Returns a sorted slice of Transient structs.
 func DetectTransients(samples []float64, sampleRate uint32, sensitivity float64, minIntervalMs int, windowSizeMs int) []Transient {
@@ -45,7 +47,8 @@ func DetectTransients(samples []float64, sampleRate uint32, sensitivity float64,
 
 	energy := computeEnergy(samples, windowSize)
 
-	// Step 2: Compute onset strength by comparing each frame to the surrounding context
+	// Step 2: Compute onset strength by comparing each frame to the
+	// surrounding context
 	onsetStrength := computeOnsetStrength(energy)
 
 	// Step 3: Adaptive thresholding based on sensitivity
@@ -91,7 +94,8 @@ func computeEnergy(samples []float64, windowSize int) []float64 {
 	return energy
 }
 
-// computeOnsetStrength calculates how much each frame's energy exceeds the local context.
+// computeOnsetStrength calculates how much each frame's energy exceeds the
+// local context.
 func computeOnsetStrength(energy []float64) []float64 {
 	if len(energy) == 0 {
 		return nil
@@ -130,15 +134,17 @@ func computeOnsetStrength(energy []float64) []float64 {
 	return onsetStrength
 }
 
-// computeAdaptiveThreshold determines the detection threshold based on sensitivity.
+// computeAdaptiveThreshold determines the detection threshold based on
+// sensitivity.
 // sensitivity 0.0 -> threshold 0.05 (very sensitive)
 // sensitivity 1.0 -> threshold 0.85 (very strict)
 func computeAdaptiveThreshold(onsetStrength []float64, sensitivity float64) float64 {
 	threshold := 0.05 + sensitivity*0.80
 
-	// For very quiet signals (max onset strength below 0.1), lower the floor so
-	// at least some transients are detected. Don't cap high-sensitivity thresholds
-	// downward — that would make sensitivity ineffective on drum-heavy material.
+	// For very quiet signals (max onset strength below 0.1), lower the
+	// floor so at least some transients are detected. Don't cap
+	// high-sensitivity thresholds downward — that would make sensitivity
+	// ineffective on drum-heavy material.
 	if len(onsetStrength) > 0 {
 		maxStrength := slices.Max(onsetStrength)
 		if maxStrength > 0 && threshold > maxStrength {
@@ -149,7 +155,8 @@ func computeAdaptiveThreshold(onsetStrength []float64, sensitivity float64) floa
 	return threshold
 }
 
-// pickTransients selects transient positions above the threshold with minimum interval enforcement.
+// pickTransients selects transient positions above the threshold with
+// minimum interval enforcement.
 func pickTransients(onsetStrength []float64, energy []float64, threshold float64, minIntervalSamples int, windowSize int, sampleRate uint32) []Transient {
 	type candidate struct {
 		frameIndex int
@@ -228,4 +235,3 @@ func findLocalPeak(energy []float64, center, searchRange int) int {
 
 	return peakIdx
 }
-

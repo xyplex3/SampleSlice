@@ -14,6 +14,7 @@ package krz
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 // fileHeaderTail is the 24 bytes that follow the magic and osize fields in
@@ -131,9 +132,11 @@ type SliceData struct {
 	Samples []int16
 	// Note is the target MIDI note number (0-127) for this slice.
 	Note int
-	// Start is the start time of the slice in seconds, relative to the source audio.
+	// Start is the start time of the slice in seconds, relative to the
+	// source audio.
 	Start float64
-	// End is the end time of the slice in seconds, relative to the source audio.
+	// End is the end time of the slice in seconds, relative to the source
+	// audio.
 	End float64
 }
 
@@ -302,12 +305,7 @@ func CreateFromSlices(slices []SliceData, opts ...CreateOption) ([]byte, error) 
 
 // sliceObjectName returns a short, unique per-slice object name.
 func sliceObjectName(i int) string {
-	const letters = "0123456789"
-	n := i + 1
-	if n < 1000 {
-		return "slice" + string(letters[n/100%10]) + string(letters[n/10%10]) + string(letters[n%10])
-	}
-	return "slice" + string(letters[n%10])
+	return fmt.Sprintf("slice%03d", i+1)
 }
 
 // int16SamplesToBE converts signed 16-bit PCM samples to raw big-endian bytes.

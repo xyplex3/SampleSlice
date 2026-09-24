@@ -1,4 +1,5 @@
-// Package midi provides shared MIDI and note-name utilities used across SampleSlice.
+// Package midi provides shared MIDI and note-name utilities used across
+// SampleSlice.
 package midi
 
 import (
@@ -20,8 +21,9 @@ var NoteNameToIndex = map[string]int{
 	"B": 11,
 }
 
-// GMDrumNotes defines the sequential MIDI note assignments used when --gm-map is active.
-// Each index corresponds to a detected slice position (kick=0, snare=1, …).
+// GMDrumNotes defines the sequential MIDI note assignments used when
+// --gm-map is active. Each index corresponds to a detected slice position
+// (kick=0, snare=1, …).
 var GMDrumNotes = []int{
 	36, // Kick
 	38, // Rim
@@ -47,8 +49,8 @@ var GMDrumNotes = []int{
 	68, // Cuica
 }
 
-// ParseNote splits a note name like "C3" or "D#4" into a chromatic index (0-11) and octave.
-// Unrecognized note names default to C (index 0).
+// ParseNote splits a note name like "C3" or "D#4" into a chromatic index
+// (0-11) and octave. Unrecognized note names default to C (index 0).
 func ParseNote(name string) (noteIdx, octave int) {
 	var notePart strings.Builder
 	for _, c := range name {
@@ -62,8 +64,8 @@ func ParseNote(name string) (noteIdx, octave int) {
 	return noteIdx, octave
 }
 
-// NoteToMIDI converts a note name like "C3" or "D#4" to a MIDI note number (0-127).
-// Returns an error if the note name portion is unrecognized.
+// NoteToMIDI converts a note name like "C3" or "D#4" to a MIDI note number
+// (0-127). Returns an error if the note name portion is unrecognized.
 func NoteToMIDI(name string) (int, error) {
 	name = strings.TrimSpace(name)
 	var notePart strings.Builder
@@ -77,7 +79,8 @@ func NoteToMIDI(name string) (int, error) {
 	}
 	np := notePart.String()
 	if len(np) > 0 {
-		// Normalize: uppercase first letter, lowercase suffix (handles "c#"→"C#", "db"→"Db")
+		// Normalize: uppercase first letter, lowercase suffix (handles
+		// "c#"→"C#", "db"→"Db")
 		np = strings.ToUpper(np[:1]) + strings.ToLower(np[1:])
 	}
 	idx, ok := NoteNameToIndex[np]

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"sampleslice/config"
@@ -36,8 +38,9 @@ func floatToInt16(samples []float64) []int16 {
 }
 
 // Run executes the full SampleSlice pipeline for the given configuration.
-// It reads the input WAV, detects transients, builds audio slices, and writes
-// the output format specified by cfg.Format. Returns an error if any step fails.
+// It reads the input WAV, detects transients, builds audio slices, and
+// writes the output format specified by cfg.Format. Returns an error if
+// any step fails.
 func Run(cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
@@ -233,6 +236,13 @@ func generateKRZPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 	voiceMode := krz.VoiceModeDrum
 	if cfg.KRZ.VoiceMode == config.VoiceModePoly {
 		voiceMode = krz.VoiceModePoly
+		slog.Warn("--voice-mode poly has no effect on generated KRZ bytes yet; use --vast-from/--vast-program to borrow a real poly patch's tone instead")
+	}
+	if cfg.KRZ.Stereo {
+		slog.Warn("--stereo has no effect on generated KRZ bytes yet")
+	}
+	if cfg.KRZ.Compress {
+		slog.Warn("--krz-compress has no effect on generated KRZ bytes yet; samples are always written as raw 16-bit PCM")
 	}
 
 	envelope := krz.DefaultDrumEnvelope()
@@ -338,7 +348,8 @@ func generateXPMPrograms(audioSlices []slice.AudioSlice, samples []float64, prog
 	return nil
 }
 
-// effectiveWindowMs returns the window size that will actually be used (substituting the default).
+// effectiveWindowMs returns the window size that will actually be used
+// (substituting the default).
 func effectiveWindowMs(configured int) int {
 	if configured <= 0 {
 		return 10
@@ -346,7 +357,8 @@ func effectiveWindowMs(configured int) int {
 	return configured
 }
 
-// effectiveBeatsPerBar returns the beats-per-bar that will actually be used (substituting the default).
+// effectiveBeatsPerBar returns the beats-per-bar that will actually be
+// used (substituting the default).
 func effectiveBeatsPerBar(configured int) int {
 	if configured < 1 {
 		return 4
@@ -366,16 +378,27 @@ func voiceModeString(m krz.VoiceMode) string {
 	}
 }
 
-// parseNoteMapConfig parses "index=note" entries into a precomputed map[sliceIndex]midiNote.
-// Malformed entries are skipped with a warning. Notes outside [0, 127] are clamped to that range.
+// parseNoteMapConfig parses "index=note" entries into a precomputed
+// map[sliceIndex]midiNote. Malformed entries are skipped with a warning.
+// Notes outside [0, 127] are clamped to that range.
 func parseNoteMapConfig(noteMap []string) map[int]int {
 	if len(noteMap) == 0 {
 		return nil
 	}
 	result := make(map[int]int, len(noteMap))
 	for _, entry := range noteMap {
-		var idx, note int
-		if _, err := fmt.Sscanf(entry, "%d=%d", &idx, &note); err != nil {
+		idxStr, noteStr, ok := strings.Cut(entry, "=")
+		if !ok {
+			slog.Warn("invalid note-map entry, skipping", "entry", entry)
+			continue
+		}
+		idx, err := strconv.Atoi(strings.TrimSpace(idxStr))
+		if err != nil {
+			slog.Warn("invalid note-map entry, skipping", "entry", entry)
+			continue
+		}
+		note, err := strconv.Atoi(strings.TrimSpace(noteStr))
+		if err != nil {
 			slog.Warn("invalid note-map entry, skipping", "entry", entry)
 			continue
 		}
@@ -410,8 +433,10 @@ func buildProgramName(userProgramName, inputPath string) string {
 	return name
 }
 
-// resolveNote determines the MIDI note for a given slice using the precomputed note map.
-// Modes: custom map (--note-map), GM drum map (--gm-map), or sequential (default).
+// resolveNote determines the MIDI note for a given slice using the
+// precomputed note map. Modes: custom map (--note-map), GM drum map
+// (--gm-map, clamped to 127 past the end of [midi.GMDrumNotes]), or
+// sequential (default).
 func resolveNote(sliceIndex int, sliceNote string, cfg *config.Config, customNoteMap map[int]int) int {
 	if len(customNoteMap) > 0 {
 		if note, ok := customNoteMap[sliceIndex]; ok {
@@ -423,7 +448,8 @@ func resolveNote(sliceIndex int, sliceNote string, cfg *config.Config, customNot
 		if sliceIndex < len(midi.GMDrumNotes) {
 			return midi.GMDrumNotes[sliceIndex]
 		}
-		return midi.GMDrumNotes[len(midi.GMDrumNotes)-1] + (sliceIndex - len(midi.GMDrumNotes))
+		note := midi.GMDrumNotes[len(midi.GMDrumNotes)-1] + (sliceIndex - len(midi.GMDrumNotes))
+		return min(note, 127)
 	}
 
 	return slice.NoteToMIDINote(sliceNote)
